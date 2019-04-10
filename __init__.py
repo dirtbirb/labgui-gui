@@ -38,6 +38,15 @@ def validate(v, mn=0, mx=255):
     return max(min(v, mx), mn)
 
 
+def to_float(value):
+    ''' Try to convert string to float; return string if failed '''
+    try:
+        value = float(value)
+    except ValueError:
+        pass
+    return value
+
+
 def average_top_px(img, n=3):
     ''' Return average of top n pixels from an image '''
     if n == 1:
@@ -205,55 +214,39 @@ class GuiPanel(wx.Panel):
         ''' Retrieve value of GUI element, not the element itself
             NOTE: Can't retrieve string selection! '''
 
-        def to_float(value):
-            ''' Try to convert string to float; return string if failed '''
-            try:
-                value = float(value)
-            except ValueError:
-                pass
-            return value
-
         elem = object.__getattribute__(self, name)
-        # wx.ItemContainerImmutable includes Choice, ComboBox, RadioBox
-        if isinstance(elem, wx.ItemContainerImmutable):
-            value = elem.GetSelection()
-        elif isinstance(elem, (wx.TextCtrl, wx.ToggleButton)):
-            value = to_float(elem.GetValue())
-        elif isinstance(elem, wx.StaticText):
-            value = to_float(elem.GetLabel())
-        else:
-            value = elem
-        return value
+        if isinstance(elem, wx.Object):
+            if isinstance(elem, (wx.TextCtrl, wx.ToggleButton)):
+                return to_float(elem.GetValue())
+            elif isinstance(elem, wx.ItemContainerImmutable):
+                # includes Choice, ComboBox, RadioBox
+                return elem.GetSelection()
+            elif isinstance(elem, wx.StaticText):
+                return to_float(elem.GetLabel())
+        return elem
 
     def __setattr__(self, name, value):
         ''' Set value of GUI element, not the element itself '''
         if hasattr(self, name):
             elem = object.__getattribute__(self, name)
-            # wx.ItemContainerImmutable includes Choice, ComboBox, RadioBox
-            if isinstance(elem, wx.ItemContainerImmutable):
-                if isinstance(value, str):
-                    elem.SetStringSelection(value)
-                else:
-                    elem.SetSelection(value)
-            elif isinstance(elem, wx.TextCtrl):
-                elem.SetValue(str(value))
-            elif isinstance(elem, wx.StaticText):
-                elem.SetLabel(str(value))
-            elif isinstance(elem, wx.ToggleButton):
-                elem.SetValue(value)
-            else:
-                object.__setattr__(self, name, value)
-        else:
-            object.__setattr__(self, name, value)
-
-    def Expose(self, item, name):
-        ''' Expose an item as a GuiPanel attribute '''
-        object.__setattr__(self, name, item)
-
-    def ExposeList(self, *items):
-        ''' Expose a list of items as GuiPanel attributes '''
-        for item in items:
-            self.Expose(*item)
+            if isinstance(elem, wx.Object):
+                if isinstance(elem, wx.ToggleButton):
+                    elem.SetValue(value)
+                    return
+                elif isinstance(elem, wx.TextCtrl):
+                    elem.SetValue(str(value))
+                    return
+                elif isinstance(elem, wx.ItemContainerImmutable):
+                    # includes Choice, ComboBox, RadioBox
+                    if isinstance(value, int):
+                        elem.SetSelection(value)
+                    else:
+                        elem.SetStringSelection(str(value))
+                    return
+                elif isinstance(elem, wx.StaticText):
+                    elem.SetLabel(str(value))
+                    return
+        object.__setattr__(self, name, value)
 
     def MakeSizerAndFit(self, *items):
         ''' Similar to SetSizerAndFit, but creates a GuiSizer from items '''
@@ -281,9 +274,8 @@ class RemotePanel(GuiPanel):
             (sensor_id_lbl, wx.GBPosition(2, 0), span1, ALIGN_CENTER_RIGHT),
             (sensor_id, wx.GBPosition(2, 1), span1))
 
-        self.ExposeList(
-            (sensor_ip, 'sensor_ip'),
-            (sensor_id, 'sensor_id'))
+        self.sensor_ip = sensor_ip
+        self.sensor_id = sensor_id
 
 
 class RoiPanel(GuiPanel):
@@ -318,13 +310,12 @@ class RoiPanel(GuiPanel):
             (apply, wx.GBPosition(4, 1), span1),
             (load, wx.GBPosition(4, 2), span1))
 
-        self.ExposeList(
-            (apply, 'apply'),
-            (load, 'load'),
-            (x, 'x'),
-            (w, 'w'),
-            (y, 'y'),
-            (h, 'h'))
+        self.apply = apply
+        self.load = load
+        self.x = x
+        self.w = w
+        self.y = y
+        self.h = h
 
 
 class ViewPanel(GuiPanel):
@@ -333,7 +324,8 @@ class ViewPanel(GuiPanel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # TODO: Update sources somehow
+        self.sources = []
+
         lbl = wx.StaticText(self, label='View')
         lbl_source = wx.StaticText(self, label='Source')
         source = wx.Choice(self, choices=[], size=sz2)
@@ -352,38 +344,26 @@ class ViewPanel(GuiPanel):
             (save_btn, wx.GBPosition(3, 0), span1, wx.EXPAND),
             (full_btn, wx.GBPosition(3, 1), span1, wx.EXPAND))
 
-        self.ExposeList(
-            (source, 'source'),
-            (open_btn, 'open'),
-            (save_btn, 'save'),
-            (start_btn, 'start'),
-            (full_btn, 'fullscreen'))
+        self.source = source
+        self.open_btn = open_btn
+        self.save_btn = save_btn
+        self.start_btn = start_btn
+        self.fullscreen = full_btn
 
-    def add_source(self, source):
-        self.display = {}
-        new_items = [(
-            wx.StaticText(self, label='Metrics'), wx.GBPosition(0, 0), span2)]
-        for name in self.values:
-            # Replace 'None' with '-' just to keep it clean
-            v = self.values[name]
-            if v is None:
-                v = '-'
-            else:
-                v = str(v)
-            # Build display
-            i = len(new_items)
-            label = wx.StaticText(self, label=name + ': ')
-            value = wx.StaticText(self, label=v)
-            new_items.append(
-                (label, wx.GBPosition(i, 0), span1, ALIGN_CENTER_RIGHT))
-            new_items.append(
-                (value, wx.GBPosition(i, 1)))
-            self.display[name] = value
-        self.MakeSizerAndFit(*new_items)
+    def add_source(self, source, name):
+        self.sources.append(source)     # Add source class to list
+        self.source.Append(name)        # Add source name to choices
+
+    def select_source(self, event=None):
+        # Add source to thing
+        pass
 
     def add_sources(self, sources):
-        for source in sources:
-            self.add_source(source)
+        if isinstance(sources, list):   # Add each from the list
+            for s in sources:
+                self.add_source(s)
+        else:
+            self.add_source(sources)    # If not actually a list
 
 
 class MetricsPanel(GuiPanel):
@@ -501,14 +481,13 @@ class ColorPanel(GuiPanel):
             (sat_btn, wx.GBPosition(4, 0), span1, wx.EXPAND),
             (sat_val, wx.GBPosition(4, 1), span1, wx.EXPAND))
 
-        self.ExposeList(
-            (colormap, 'colormap'),
-            (range_btn, 'range_btn'),
-            (range_val, 'range_val'),
-            (gamma_btn, 'gamma_btn'),
-            (gamma_val, 'gamma_val'),
-            (sat_btn, 'sat_btn'),
-            (sat_val, 'sat_val'))
+        self.colormap = colormap
+        self.range_btn = range_btn
+        self.range_val = range_val
+        self.gamma_btn = gamma_btn
+        self.gamma_val = gamma_val
+        self.sat_btn = sat_btn
+        self.sat_val = sat_val
 
         self.set_gamma()
 
@@ -621,10 +600,9 @@ class FlatFieldPanel(GuiPanel):
             (save, wx.GBPosition(2, 0), span1),
             (apply, wx.GBPosition(2, 1), span1))
 
-        self.ExposeList(
-            (save, 'save'),
-            (apply, 'apply'),
-            (thumb, 'thumb'))
+        self.save = save
+        self.apply = apply
+        self.thumb = thumb
 
     def save(self, event=None):
         ''' Update flat field and thumbnail '''
@@ -649,8 +627,7 @@ class FlatFieldPanel(GuiPanel):
         if self.apply:
             # Cancel if image size or color depth has changed
             if self.ff.shape != img.shape:
-                self.ff_flag = False
-                self.ff_apply.SetValue(False)
+                self.apply = False
             else:
                 img = np.where(img > self.ff, img - self.ff, 0)
         return img
@@ -703,14 +680,13 @@ class TargetPanel(GuiPanel):
             (size, wx.GBPosition(4, 1), span1, wx.EXPAND),
             (reset_btn, wx.GBPosition(4, 2), span1, wx.EXPAND))
 
-        self.ExposeList(
-            (target, 'target'),
-            (size, 'size'),
-            (x, 'x'),
-            (y, 'y'),
-            (px_x, 'px_x'),
-            (px_y, 'px_y'),
-            (reset_btn, 'reset_btn'))
+        self.target = target
+        self.size = size
+        self.x = x
+        self.y = y
+        self.px_x = px_x
+        self.px_y = px_y
+        self.reset_btn = reset_btn
 
         self.reset()
 
@@ -749,6 +725,7 @@ class TargetPanel(GuiPanel):
             dc.SetBrush(self.target_brush)
 
             # Convert sizes to pixels for this DC (adapts to fullscreen)
+            # TODO: do this for raw pixel entries too
             if self.x < 1:
                 x_c = self.img_size[0] * self.x
             else:
