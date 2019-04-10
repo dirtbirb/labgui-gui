@@ -359,6 +359,32 @@ class ViewPanel(GuiPanel):
             (start_btn, 'start'),
             (full_btn, 'fullscreen'))
 
+    def add_source(self, source):
+        self.display = {}
+        new_items = [(
+            wx.StaticText(self, label='Metrics'), wx.GBPosition(0, 0), span2)]
+        for name in self.values:
+            # Replace 'None' with '-' just to keep it clean
+            v = self.values[name]
+            if v is None:
+                v = '-'
+            else:
+                v = str(v)
+            # Build display
+            i = len(new_items)
+            label = wx.StaticText(self, label=name + ': ')
+            value = wx.StaticText(self, label=v)
+            new_items.append(
+                (label, wx.GBPosition(i, 0), span1, ALIGN_CENTER_RIGHT))
+            new_items.append(
+                (value, wx.GBPosition(i, 1)))
+            self.display[name] = value
+        self.MakeSizerAndFit(*new_items)
+
+    def add_sources(self, sources):
+        for source in sources:
+            self.add_source(source)
+
 
 class MetricsPanel(GuiPanel):
     ''' Metrics readout panel
@@ -554,7 +580,7 @@ class ColorPanel(GuiPanel):
 
     def apply_sat_img(self, img):
         ''' Make previously-saved pixels red '''
-        if self.sat_btn:
+        if self.sat_btn and hasattr(self, 'saturated'):
             if len(img.shape) != 3:
                 img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
             img[self.saturated] = (0, 0, 255)   # red
@@ -718,13 +744,22 @@ class TargetPanel(GuiPanel):
         self.img_size = dc.Size
         target = self.target
         if self.target:
+            # Set brushes
             dc.SetPen(self.target_pen)
             dc.SetBrush(self.target_brush)
 
-            x_c = self.px_x
-            y_c = self.px_y
+            # Convert sizes to pixels for this DC (adapts to fullscreen)
+            if self.x < 1:
+                x_c = self.img_size[0] * self.x
+            else:
+                x_c = self.x
+            if self.y < 1:
+                y_c = self.img_size[1] * self.y
+            else:
+                y_c = self.y
             r = self.size
 
+            # Draw target
             if target == 1:
                 dc.DrawLineList((
                     (x_c, y_c-r, x_c, y_c-5),
@@ -736,10 +771,9 @@ class TargetPanel(GuiPanel):
                 dc.DrawRectangle(x_c-r, y_c-r, r2, r2)
             elif target == 3:
                 dc.DrawCircle(x_c, y_c, r)
-        return dc
 
     def process_dc(self, dc):
-        return self.target_dc(dc)
+        self.target_dc(dc)
 
     def target_img(self, img):
         # TODO: process opencv image
