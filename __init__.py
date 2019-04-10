@@ -142,6 +142,7 @@ class GuiFrame(wx.Frame):
         self.pad, self.pad_outer = pad, pad_outer
         self.image = np.zeros(sz_img, np.uint8)
         self.image_window = GuiImage(self)
+        self.sensor_panels = []
         self.layout = {
             'init_funcs': [],
             'left': [],
@@ -324,16 +325,17 @@ class ViewPanel(GuiPanel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.sources = []
+        self.inserted_panels = []
 
         lbl = wx.StaticText(self, label='View')
         lbl_source = wx.StaticText(self, label='Source')
         source = wx.Choice(self, choices=[], size=sz2)
-        source.SetSelection(0)
         open_btn = wx.ToggleButton(self, label='Open', size=sz2)
         start_btn = wx.ToggleButton(self, label='Start', size=sz2)
         save_btn = wx.Button(self, label='Save', size=sz1)
         full_btn = wx.Button(self, label='Full', size=sz1)
+
+        source.Bind(wx.EVT_CHOICE, self.select_source)
 
         self.MakeSizerAndFit(
             (lbl, wx.GBPosition(0, 0), span2),
@@ -350,13 +352,36 @@ class ViewPanel(GuiPanel):
         self.start_btn = start_btn
         self.fullscreen = full_btn
 
-    def add_source(self, source, name):
-        self.sources.append(source)     # Add source class to list
-        self.source.Append(name)        # Add source name to choices
+    def add_source(self, name, obj, panels):
+        self.source.Append(name, (obj, panels))
+
+    def del_source(self, index):
+        self.sources.Delete(index)
 
     def select_source(self, event=None):
-        # Add source to thing
-        pass
+        parent = self.GetParent()
+        layout = parent.layout
+        index = self.source
+        obj, new_panels = self.source[index].GetClientData()
+        # Create source object
+        try:
+            parent.cam = obj()
+        except Exception as e:
+            print("Error: couldn't create sensor object. Details:\n", e)
+            self.del_source(index)
+            new_panels = []
+        # Remove old panels
+        for old_panel in self.inserted_panels:
+            old_panel, location = old_panel
+            for i, gui_panel in enumerate(layout[location]):
+                if type(old_panel) == type(gui_panel):
+                    layout[location].pop(i)
+        # Add new panels and reassemble GUI
+        self.inserted_panels = new_panels
+        for new_panel in new_panels:
+            panel, location = new_panel
+            parent.layout[location].insert(panel, 1)
+        parent.assemble()
 
     def add_sources(self, sources):
         if isinstance(sources, list):   # Add each from the list
