@@ -553,10 +553,8 @@ class ColorPanel(GuiPanel):
         colormap = self.colormap - 2
         if colormap > -1:                  # Colormap
             img = cv2.applyColorMap(img, colormap)
-            color = True
-        elif colormap == -2 and color:     # Force gray
+        elif colormap == -2 and len(img.shape) == 3:     # Force gray
             img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            color = False
         return img
 
     def range_img(self, img):
