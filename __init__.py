@@ -747,16 +747,23 @@ class TargetPanel(GuiPanel):
             dc.SetPen(self.target_pen)
             dc.SetBrush(self.target_brush)
 
-            # Convert sizes to pixels for this DC (adapts to fullscreen)
+            # Validate input
+            try:
+                x, y = float(self.x), float(self.y)
+            except ValueError:
+                self.reset()
+                return
+
+            # Convert sizes to pixels appropriate to given DC
             # TODO: do this for raw pixel entries too
-            if self.x < 1:
-                x_c = self.img_size[0] * self.x
+            if x < 1:
+                x_c = self.img_size[0] * x
             else:
-                x_c = self.x
-            if self.y < 1:
-                y_c = self.img_size[1] * self.y
+                x_c = x
+            if y < 1:
+                y_c = self.img_size[1] * y
             else:
-                y_c = self.y
+                y_c = y
             r = self.size
 
             # Draw target
