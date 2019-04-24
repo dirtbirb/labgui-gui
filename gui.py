@@ -211,9 +211,37 @@ class GuiPanel(wx.Panel):
         # Set anything else as normal
         object.__setattr__(self, name, value)
 
+    def MakeLabel(self):
+        return wx.StaticText(self, label=self.GetName())
+
     def MakeSizerAndFit(self, *items):
         ''' Similar to SetSizerAndFit, but creates a GuiSizer first '''
         self.SetSizerAndFit(GuiSizer(*items))
+
+
+# class SettingsPanel(GuiPanel):
+#     def __init__(self, *args, name='Sensor', **kwargs):
+#         super().__init__(*args, name=name, **kwargs)
+#
+#         exposure_lbl = wx.StaticText(self, label='Exposure')
+#         exposure = wx.TextCtrl(self, size=sz2)
+#         gain_lbl = wx.StaticText(self, label='Gain')
+#         gain = wx.TextCtrl(self, size=sz2)
+#         framerate_lbl = wx.StaticText(self, label='Framerate')
+#         framerate = wx.TextCtrl(self, size=sz2)
+#
+#         self.MakeSizerAndFit(
+#             (self.MakeLabel(), wx.GBPosition(0, 0), span2),
+#             (exposure_lbl, wx.GBPosition(1, 0), span1, ALIGN_CENTER_RIGHT),
+#             (exposure, wx.GBPosition(1, 1)),
+#             (gain_lbl, wx.GBPosition(2, 0), span1, ALIGN_CENTER_RIGHT),
+#             (gain, wx.GBPosition(2, 1)),
+#             (framerate_lbl, wx.GBPosition(3, 0), span1, ALIGN_CENTER_RIGHT),
+#             (framerate, wx.GBPosition(3, 1)))
+#
+#         self.exposure = exposure
+#         self.gain = gain
+#         self.framerate = framerate
 
 
 class ViewPanel(GuiPanel):
@@ -221,13 +249,12 @@ class ViewPanel(GuiPanel):
         Unlike other panels, this panel is tightly integrated with BasicGui.
         Many functions use GetParent() to manipulate BasicGui directly. '''
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, name='View', **kwargs):
+        super().__init__(*args, name=name, **kwargs)
 
         self.inserted_panels = []
         self.video_writer = None
 
-        lbl = wx.StaticText(self, label='View')
         source = wx.Choice(self)
         play_btn = wx.ToggleButton(self, label='Play', size=sz1)
         full_btn = wx.Button(self, label='Full', size=sz1)
@@ -240,7 +267,7 @@ class ViewPanel(GuiPanel):
         source.Bind(wx.EVT_CHOICE, self.select_source)
 
         self.MakeSizerAndFit(
-            (lbl, wx.GBPosition(0, 0), span2),
+            (self.MakeLabel(), wx.GBPosition(0, 0), span2),
             (source, wx.GBPosition(1, 0), span3, wx.EXPAND),
             (play_btn, wx.GBPosition(2, 1), span1, wx.EXPAND),
             (full_btn, wx.GBPosition(2, 2), span1, wx.EXPAND),
@@ -321,54 +348,27 @@ class ViewPanel(GuiPanel):
         parent.Assemble()
 
 
-# Sensor controls
-
-class ConnectPanel(GuiPanel):
-    ''' Sensor control and basic info '''
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        lbl = wx.StaticText(self, label='Sensor')
-        sensor_ip_lbl = wx.StaticText(self, label='IP')
-        sensor_ip = wx.TextCtrl(self, size=sz2, style=wx.TE_PROCESS_ENTER)
-        sensor_id_lbl = wx.StaticText(self, label='ID')
-        sensor_id = wx.TextCtrl(
-            self, size=sz2, value='0', style=wx.TE_PROCESS_ENTER)
-
-        self.MakeSizerAndFit(
-            (lbl, wx.GBPosition(0, 0), span2),
-            (sensor_ip_lbl, wx.GBPosition(1, 0), span1, ALIGN_CENTER_RIGHT),
-            (sensor_ip, wx.GBPosition(1, 1), span1, wx.EXPAND),
-            (sensor_id_lbl, wx.GBPosition(2, 0), span1, ALIGN_CENTER_RIGHT),
-            (sensor_id, wx.GBPosition(2, 1), span1))
-
-        self.sensor_ip = sensor_ip
-        self.sensor_id = sensor_id
-
-        # TODO: Add sensor info
-
+# Sensor templates
 
 class RoiPanel(GuiPanel):
     ''' ROI (Region Of Interest) control '''
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, name='ROI', **kwargs):
+        super().__init__(*args, name=name, **kwargs)
 
-        apply = wx.Button(self, label='Set', size=sz1)
-        load = wx.Button(self, label='Load', size=sz1)
-        lbl = wx.StaticText(self, label='ROI')
-        y_lbl = wx.StaticText(self, label='y')
-        x_lbl = wx.StaticText(self, label='x')
         offset_lbl = wx.StaticText(self, label='Offset')
         size_lbl = wx.StaticText(self, label='Size')
+        x_lbl = wx.StaticText(self, label='x')
         x = wx.TextCtrl(self, value='0.0', size=sz1, style=wx.TE_PROCESS_ENTER)
         w = wx.TextCtrl(self, value='1.0', size=sz1, style=wx.TE_PROCESS_ENTER)
+        y_lbl = wx.StaticText(self, label='y')
         y = wx.TextCtrl(self, value='0.0', size=sz1, style=wx.TE_PROCESS_ENTER)
         h = wx.TextCtrl(self, value='1.0', size=sz1, style=wx.TE_PROCESS_ENTER)
+        apply = wx.Button(self, label='Set', size=sz1)
+        load = wx.Button(self, label='Load', size=sz1)
 
         self.MakeSizerAndFit(
-            (lbl, wx.GBPosition(0, 0), span3),
+            (self.MakeLabel(), wx.GBPosition(0, 0), span3),
             (offset_lbl, wx.GBPosition(1, 1), span1,
                 wx.ALIGN_CENTER_HORIZONTAL),
             (size_lbl, wx.GBPosition(1, 2), span1, wx.ALIGN_CENTER_HORIZONTAL),
@@ -397,19 +397,18 @@ class MetricsPanel(GuiPanel):
         Start regular updates by passing an Event flag to start()
         Stop regular updates with stop() '''
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, name='Metrics', **kwargs):
         if 'values' in kwargs:
             self.values = kwargs.pop('values')
         else:
             self.values = {}
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, name=name, **kwargs)
         self.build()
         self.updating = False
 
     def build(self):
         self.display = {}
-        new_items = [(
-            wx.StaticText(self, label='Metrics'), wx.GBPosition(0, 0), span2)]
+        new_items = [(self.MakeLabel(), wx.GBPosition(0, 0), span2)]
         for name in self.values:
             # Replace 'None' with '-' just to keep it clean
             v = self.values[name]
@@ -456,8 +455,8 @@ class MetricsPanel(GuiPanel):
 class ColorPanel(GuiPanel):
     ''' Color processing '''
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, name='color', **kwargs):
+        super().__init__(*args, name=name, **kwargs)
 
         colormaps = (
             'force gray',
@@ -474,7 +473,6 @@ class ColorPanel(GuiPanel):
             'sping',
             'summer',
             'winter')
-        label = wx.StaticText(self, label='Color')
         colormap = wx.Choice(self, choices=colormaps)
         colormap.SetSelection(1)     # no colormap
         range_btn = wx.ToggleButton(self, label='Range', size=sz2)
@@ -495,7 +493,7 @@ class ColorPanel(GuiPanel):
         sat_val.Bind(wx.EVT_TEXT_ENTER, self.set_sat)
 
         self.MakeSizerAndFit(
-            (label, wx.GBPosition(0, 0), span2),
+            (self.MakeLabel(), wx.GBPosition(0, 0), span2),
             (colormap, wx.GBPosition(1, 0), span2, wx.EXPAND),
             (range_btn, wx.GBPosition(2, 0), span1, wx.EXPAND),
             (range_val, wx.GBPosition(2, 1), span1, wx.EXPAND),
@@ -602,12 +600,11 @@ class ColorPanel(GuiPanel):
 class FlatFieldPanel(GuiPanel):
     ''' Flat field controls '''
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, name='Flat field', **kwargs):
+        super().__init__(*args, name=name, **kwargs)
 
         self.ff = None  # Flat frame
 
-        lbl = wx.StaticText(self, label='Flat field')
         thumb = GuiImage(self, size=sz_thumb)
         save = wx.Button(self, label='Update', size=sz2)
         apply = wx.ToggleButton(self, label='Apply', size=sz2)
@@ -616,7 +613,7 @@ class FlatFieldPanel(GuiPanel):
         apply.Bind(wx.EVT_TOGGLEBUTTON, self.validate)
 
         self.MakeSizerAndFit(
-            (lbl, wx.GBPosition(0, 0), span2),
+            (self.MakeLabel(), wx.GBPosition(0, 0), span2),
             (thumb, wx.GBPosition(1, 0), span2, wx.ALIGN_CENTER),
             (save, wx.GBPosition(2, 0), span1),
             (apply, wx.GBPosition(2, 1), span1))
@@ -660,15 +657,14 @@ class FlatFieldPanel(GuiPanel):
 class TargetPanel(GuiPanel):
     ''' Target overlay '''
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, name='Target', **kwargs):
+        super().__init__(*args, name=name, **kwargs)
         self.img_size = sz_img  # Updated in process_img / process_dc
 
         # These can't be initialized at the class level...
         self.target_pen = wx.Pen((0, 200, 0), 2)  # Lime green
         self.target_brush = wx.Brush((0, 0, 0), wx.BRUSHSTYLE_TRANSPARENT)
 
-        label = wx.StaticText(self, label='Target')
         self.targets = ('no target', 'crosshair', 'box', 'circle')
         target = wx.Choice(self, choices=self.targets)
         size_lbl = wx.StaticText(self, label='Size ')
@@ -687,7 +683,7 @@ class TargetPanel(GuiPanel):
             elem.Bind(wx.EVT_TEXT_ENTER, self.set_size)
 
         self.MakeSizerAndFit(
-            (label, wx.GBPosition(0, 0), span3, wx.EXPAND),
+            (self.MakeLabel(), wx.GBPosition(0, 0), span3),
             (target, wx.GBPosition(1, 0), span3, wx.EXPAND),
             (size_lbl, wx.GBPosition(2, 0), span1, ALIGN_CENTER_RIGHT),
             (size, wx.GBPosition(2, 1), span1, wx.EXPAND),
@@ -791,9 +787,8 @@ class TargetPanel(GuiPanel):
 class FullscreenFrame(wx.Frame):
     ''' Frame that simulates fullscreen on Show() '''
 
-    def __init__(self, *args, **kwargs):
-        kwargs['style'] = 0
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, style=0, **kwargs):
+        super().__init__(*args, style=style, **kwargs)
 
         def OnKey(event):
             ''' Exit fullscreen on ESC and inform parent frame '''
