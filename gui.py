@@ -365,44 +365,32 @@ class RoiPanel(GuiPanel):
 
 
 class SettingsPanel(GuiPanel):
+    ''' Sensor settings panel
+        Provides build_settings as a helper method to create control panels
+        from a list of settings. '''
+
     def __init__(self, *args, name='Sensor', **kwargs):
         super().__init__(*args, name=name, **kwargs)
 
-        self.settings = [
-            'exposure',
-            'gain',
-            'framerate']
-        # exposure_lbl = wx.StaticText(self, label='Exposure')
-        # exposure = wx.TextCtrl(self, size=sz2)
-        # gain_lbl = wx.StaticText(self, label='Gain')
-        # gain = wx.TextCtrl(self, size=sz2)
-        # framerate_lbl = wx.StaticText(self, label='Framerate')
-        # framerate = wx.TextCtrl(self, size=sz2)
-        #
-        # self.MakeSizerAndFit(
-        #     (self.MakeLabel(), wx.GBPosition(0, 0), span2),
-        #     (exposure_lbl, wx.GBPosition(1, 0), span1, ALIGN_CENTER_RIGHT),
-        #     (exposure, wx.GBPosition(1, 1)),
-        #     (gain_lbl, wx.GBPosition(2, 0), span1, ALIGN_CENTER_RIGHT),
-        #     (gain, wx.GBPosition(2, 1)),
-        #     (framerate_lbl, wx.GBPosition(3, 0), span1, ALIGN_CENTER_RIGHT),
-        #     (framerate, wx.GBPosition(3, 1)))
-        #
-        # self.exposure = exposure
-        # self.gain = gain
-        # self.framerate = framerate
-
-    def build_elements(self, elements=[]):
-        ''' Build panel from a list of strings representing settings '''
-        for setting in self.settings:
+    def build_settings(self, elements=[]):
+        ''' Build panel from a list of settings.
+            Input: List of (setting, unit) tuples. Both are strings.
+            Output: Sets panel attributes and extends "elements" with the
+                following for each input tuple, including wx styling:
+                (StaticText label, TextCtrl value, StaticText units)
+            TODO: Support more than one column '''
+        i = len(elements)
+        for setting, unit in self.settings:
             label = wx.StaticText(self, label=setting)
-            value = wx.TextCtrl(self, size=sz2)
-            i = len(elements)
-            elements.append(
-                (label, wx.GBPosition(i, 0), span1, ALIGN_CENTER_RIGHT))
-            elements.append(
-                (value, wx.GBPosition(i, 1)))
-            self.__setattr__(setting, value)
+            value = wx.TextCtrl(self, size=sz2, style=wx.TE_PROCESS_ENTER)
+            unit = wx.StaticText(self, label=unit)
+            elements.extend([
+                (label, wx.GBPosition(i, 0), span1, ALIGN_CENTER_RIGHT),
+                (value, wx.GBPosition(i, 1), span1, wx.EXPAND),
+                (unit, wx.GBPosition(i, 2), span1, wx.ALIGN_CENTER_VERTICAL)])
+            setting = setting.lower().replace(' ', '_')
+            self.__setattr__(setting.lower(), value)
+            i += 1
         return elements
 
 
@@ -437,10 +425,9 @@ class MetricsPanel(GuiPanel):
             i = len(new_items)
             label = wx.StaticText(self, label=name + ': ')
             value = wx.StaticText(self, label=v)
-            new_items.append(
-                (label, wx.GBPosition(i, 0), span1, ALIGN_CENTER_RIGHT))
-            new_items.append(
-                (value, wx.GBPosition(i, 1)))
+            new_items.extend([
+                (label, wx.GBPosition(i, 0), span1, ALIGN_CENTER_RIGHT),
+                (value, wx.GBPosition(i, 1))])
             self.display[name] = value
         self.MakeSizerAndFit(*new_items)
 
