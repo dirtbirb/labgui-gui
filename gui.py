@@ -219,31 +219,6 @@ class GuiPanel(wx.Panel):
         self.SetSizerAndFit(GuiSizer(*items))
 
 
-# class SettingsPanel(GuiPanel):
-#     def __init__(self, *args, name='Sensor', **kwargs):
-#         super().__init__(*args, name=name, **kwargs)
-#
-#         exposure_lbl = wx.StaticText(self, label='Exposure')
-#         exposure = wx.TextCtrl(self, size=sz2)
-#         gain_lbl = wx.StaticText(self, label='Gain')
-#         gain = wx.TextCtrl(self, size=sz2)
-#         framerate_lbl = wx.StaticText(self, label='Framerate')
-#         framerate = wx.TextCtrl(self, size=sz2)
-#
-#         self.MakeSizerAndFit(
-#             (self.MakeLabel(), wx.GBPosition(0, 0), span2),
-#             (exposure_lbl, wx.GBPosition(1, 0), span1, ALIGN_CENTER_RIGHT),
-#             (exposure, wx.GBPosition(1, 1)),
-#             (gain_lbl, wx.GBPosition(2, 0), span1, ALIGN_CENTER_RIGHT),
-#             (gain, wx.GBPosition(2, 1)),
-#             (framerate_lbl, wx.GBPosition(3, 0), span1, ALIGN_CENTER_RIGHT),
-#             (framerate, wx.GBPosition(3, 1)))
-#
-#         self.exposure = exposure
-#         self.gain = gain
-#         self.framerate = framerate
-
-
 class ViewPanel(GuiPanel):
     ''' View options
         Unlike other panels, this panel is tightly integrated with BasicGui.
@@ -389,6 +364,48 @@ class RoiPanel(GuiPanel):
         self.h = h
 
 
+class SettingsPanel(GuiPanel):
+    def __init__(self, *args, name='Sensor', **kwargs):
+        super().__init__(*args, name=name, **kwargs)
+
+        self.settings = [
+            'exposure',
+            'gain',
+            'framerate']
+        # exposure_lbl = wx.StaticText(self, label='Exposure')
+        # exposure = wx.TextCtrl(self, size=sz2)
+        # gain_lbl = wx.StaticText(self, label='Gain')
+        # gain = wx.TextCtrl(self, size=sz2)
+        # framerate_lbl = wx.StaticText(self, label='Framerate')
+        # framerate = wx.TextCtrl(self, size=sz2)
+        #
+        # self.MakeSizerAndFit(
+        #     (self.MakeLabel(), wx.GBPosition(0, 0), span2),
+        #     (exposure_lbl, wx.GBPosition(1, 0), span1, ALIGN_CENTER_RIGHT),
+        #     (exposure, wx.GBPosition(1, 1)),
+        #     (gain_lbl, wx.GBPosition(2, 0), span1, ALIGN_CENTER_RIGHT),
+        #     (gain, wx.GBPosition(2, 1)),
+        #     (framerate_lbl, wx.GBPosition(3, 0), span1, ALIGN_CENTER_RIGHT),
+        #     (framerate, wx.GBPosition(3, 1)))
+        #
+        # self.exposure = exposure
+        # self.gain = gain
+        # self.framerate = framerate
+
+    def build_elements(self, elements=[]):
+        ''' Build panel from a list of strings representing settings '''
+        for setting in self.settings:
+            label = wx.StaticText(self, label=setting)
+            value = wx.TextCtrl(self, size=sz2)
+            i = len(elements)
+            elements.append(
+                (label, wx.GBPosition(i, 0), span1, ALIGN_CENTER_RIGHT))
+            elements.append(
+                (value, wx.GBPosition(i, 1)))
+            self.__setattr__(setting, value)
+        return elements
+
+
 class MetricsPanel(GuiPanel):
     ''' Metrics readout panel
         Update values (not display!) by editing dict 'values'
@@ -455,7 +472,7 @@ class MetricsPanel(GuiPanel):
 class ColorPanel(GuiPanel):
     ''' Color processing '''
 
-    def __init__(self, *args, name='color', **kwargs):
+    def __init__(self, *args, name='Color', **kwargs):
         super().__init__(*args, name=name, **kwargs)
 
         colormaps = (
