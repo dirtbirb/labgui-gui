@@ -120,6 +120,21 @@ def FileDialog(msg, ext=None, save=False):
 
 
 # Misc ------------------------------------------------------------------------
+# def func_wrap(function):
+#     ''' Wrap an arbitrary function to read/set a GUI element '''
+#
+#     def wrapped_func(event):
+#         # Get value to set, if any
+#         obj = event.GetEventObject()
+#         val = obj.GetValue()
+#         try:
+#             val = float(val)
+#         except ValueError:
+#             val = None
+#         # Send parameter if given, update GUI with new value either way
+#         obj.SetValue(str(function(val)))
+#
+#     return wrapped_func
 
 class GuiImage(wx.Window):
     ''' Basic wx Window for painting images on '''
@@ -162,7 +177,12 @@ class GuiSizer(wx.GridBagSizer):
 # wx.Panel --------------------------------------------------------------------
 
 class GuiPanel(wx.Panel):
-    ''' Panel containing GUI elements that can be read/set like attributes '''
+    ''' Panel containing GUI elements that can be read/set like attributes
+        Also can be passed a device object for GUI to interact with. '''
+
+    def __init__(self, *args, device=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.device = device
 
     def __getattribute__(self, name):
         ''' Retrieve value of GUI elements as properties '''
@@ -210,6 +230,29 @@ class GuiPanel(wx.Panel):
                     return
         # Set anything else as normal
         object.__setattr__(self, name, value)
+
+    # def Bind(self, name, event, func):
+    #     ''' Bypass custom getattr/setattr to bind external functions '''
+    #     object.__getattribute__(self, name).Bind(event, func)
+    #
+    # def BindControl(self, name, event, ext_func):
+    #     ''' Wrap function with GUI element to read from / display to '''
+    #
+    #     def bind_func(event):
+    #         # Get value to set, if any
+    #         val = self.__getattribute__(name)
+    #         try:
+    #             val = float(val)
+    #         except ValueError:      # HACK: Can't send strings
+    #             val = None
+    #         # Set parameter if given, update GUI with current value
+    #         self.__setattr__(name, ext_func(val))
+    #
+    #     self.Bind(name, event, bind_func)
+
+    def GetElement(self, name):
+        ''' Bypass custom __getattribute__ '''
+        return object.__getattribute__(self, name)
 
     def MakeLabel(self):
         return wx.StaticText(self, label=self.GetName())
@@ -268,24 +311,25 @@ class ViewPanel(GuiPanel):
         ''' Start/stop recording, with save dialog '''
         parent = self.GetParent()
         if parent and hasattr(parent, 'image') and parent.image is not None:
-            if self.save_vid_btn:   # Start recording (via dialog)
+            if self.save_vid_btn:       # Start recording (via dialog)
                 fn = FileDialog('Save video', '.avi', save=True)
                 if fn:
                     codec = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
                     fps = 10
                     shape = self.GetParent().image.shape[:2]
                     self.video_writer = cv2.VideoWriter(fn, codec, fps, shape)
-                else:               # Cancel recording
+                else:                   # Cancel recording
                     self.save_vid_btn = False
-            else:                   # Finish recording
+            else:                       # Finish recording
                 if self.video_writer:
                     self.video_writer.release()
                 self.video_writer = None
         else:
             self.save_vid_btn = False
 
-    def add_source(self, name, obj, panels):
-        self.sources.Append(name, (obj, panels))
+    def add_source(self, name, obj):
+        # Append name to GUI, obj to ClientData
+        self.GetElement('source').Append(name, obj)
 
     def add_sources(self, sources):
         if isinstance(sources, list):   # Add each from the list
@@ -295,31 +339,31 @@ class ViewPanel(GuiPanel):
             self.add_source(sources)    # If not actually a list
 
     def del_source(self, index):
-        self.sources.Delete(index)
+        self.GetElement('source').Delete(index)
 
     def select_source(self, event=None):
         parent = self.GetParent()
         layout = parent.layout
         index = self.source
-        obj, new_panels = self.source[index].GetClientData()
+        obj = self.GetElement(self.source).GetClientData(index)
         # Create source object
         try:
-            parent.cam = obj(parent.img_queue)
+            self.device = obj(parent.img_queue)
         except Exception as e:
             print("Error: couldn't create sensor object. Details:\n", e)
             self.del_source(index)
             new_panels = []
-        # Remove old panels
-        for old_panel in self.inserted_panels:
-            panel, location = old_panel
-            for i, gui_panel in enumerate(layout[location]):
-                if type(panel) == type(gui_panel):
-                    layout[location].pop(i)
+        finally:
+            # Remove old panels
+            for old_panel in self.inserted_panels:
+                panel, location = old_panel
+                for i, gui_panel in enumerate(layout[location]):
+                    if type(panel) == type(gui_panel):
+                        layout[location].pop(i)
         # Add new panels and reassemble GUI
-        self.inserted_panels = new_panels
-        for new_panel in new_panels:
-            panel, location = new_panel
-            parent.layout[location].insert(panel, 1)
+        new_panels = self.device.make_panels(parent)
+        for i, new_panel in enumerate(new_panels):
+            parent.layout['bottom'].insert(panel, i+1)
         parent.Assemble()
 
 
@@ -363,6 +407,26 @@ class RoiPanel(GuiPanel):
         self.y = y
         self.h = h
 
+        def roi(event=None):
+            if not self.device:
+                return
+
+            # TODO: Validate
+
+            new = self.device.roi(
+                {'x': self.x, 'y': self.y, 'w': self.w, 'h': self.h})
+            self.x = new['x']
+            self.y = new['y']
+            self.w = new['w']
+            self.h = new['h']
+
+        x.Bind(wx.EVT_TEXT_ENTER, roi)
+        y.Bind(wx.EVT_TEXT_ENTER, roi)
+        w.Bind(wx.EVT_TEXT_ENTER, roi)
+        h.Bind(wx.EVT_TEXT_ENTER, roi)
+        apply.Bind(wx.EVT_BUTTON, roi)
+        # load.Bind(wx.EVT_BUTTON, self.set_roi)
+
 
 class SettingsPanel(GuiPanel):
     ''' Sensor settings panel
@@ -372,24 +436,46 @@ class SettingsPanel(GuiPanel):
     def __init__(self, *args, name='Sensor', **kwargs):
         super().__init__(*args, name=name, **kwargs)
 
-    def build_settings(self, elements=[]):
-        ''' Build panel from a list of settings.
-            Input: List of (setting, unit) tuples. Both are strings.
-            Output: Sets panel attributes and extends "elements" with the
-                following for each input tuple, including wx styling:
-                (StaticText label, TextCtrl value, StaticText units)
-            TODO: Support more than one column '''
-        i = len(elements)
-        for setting, unit in self.settings:
-            label = wx.StaticText(self, label=setting)
-            value = wx.TextCtrl(self, size=sz2, style=wx.TE_PROCESS_ENTER)
-            unit = wx.StaticText(self, label=unit)
+    def build_textctrls(self, textctrls, start=(0, 0)):
+        ''' Build column of functional wx.TextCtrls from a list of parameters.
+            textctrls: List of parameter tuples for which to build controls:
+                (label, units, function)
+            start: (row, column) tuple of first element
+            Sets panel attributes, binds functions, and returns GUI elements:
+                [(StaticText label, TextCtrl value, StaticText units)...] '''
+
+        def make_binding(func):
+            def binding(event):
+                obj = event.GetEventObject()
+                val = obj.GetValue()
+                try:
+                    val = float(val)
+                except ValueError:  # HACK: Reject '' or any non-numeric string
+                    val = None
+                # Set parameter if given, update GUI with current value
+                obj.SetValue(str(func(val)))
+            return binding
+
+        if not isinstance(textctrls, list):
+            raise TypeError("SettingsPanel.build_column() requires a list")
+
+        i, j = start
+        elements = []
+        for param, units, func in textctrls:
+            # Create GUI elements
+            label = wx.StaticText(self, label=param)
+            field = wx.TextCtrl(self, size=sz2, style=wx.TE_PROCESS_ENTER)
+            units = wx.StaticText(self, label=units)
+            # Add GUI layout
             elements.extend([
-                (label, wx.GBPosition(i, 0), span1, ALIGN_CENTER_RIGHT),
-                (value, wx.GBPosition(i, 1), span1, wx.EXPAND),
-                (unit, wx.GBPosition(i, 2), span1, wx.ALIGN_CENTER_VERTICAL)])
-            setting = setting.lower().replace(' ', '_')
-            self.__setattr__(setting.lower(), value)
+                (label, wx.GBPosition(i, j), span1, ALIGN_CENTER_RIGHT),
+                (field, wx.GBPosition(i, j+1), span1, wx.EXPAND),
+                (units, wx.GBPosition(i, j+2), span1,
+                    wx.ALIGN_CENTER_VERTICAL)])
+            # Bind function to ctrl
+            field.Bind(wx.EVT_TEXT_ENTER, make_binding(func))
+            # Expose ctrl as panel attribute
+            self.__setattr__(param.lower().replace(' ', '_'), field)
             i += 1
         return elements
 
@@ -794,14 +880,14 @@ class FullscreenFrame(wx.Frame):
     def __init__(self, *args, style=0, **kwargs):
         super().__init__(*args, style=style, **kwargs)
 
-        def OnKey(event):
+        def on_key(event):
             ''' Exit fullscreen on ESC and inform parent frame '''
             if event.GetKeyCode() == wx.WXK_ESCAPE:
                 self.GetParent().fullscreen = False
                 self.Hide()
 
         window = wx.Window(self)    # Required to process EVT_KEY_DOWN
-        window.Bind(wx.EVT_KEY_DOWN, OnKey)
+        window.Bind(wx.EVT_KEY_DOWN, on_key)
 
     def Show(self, show=True):
         super().Show(show)
@@ -819,7 +905,7 @@ class BasicGui(wx.Frame):
         self.image_window = GuiImage(self)
         self.image_full = FullscreenFrame(self)
         self.image = np.zeros(sz_img, dtype=np.uint8)
-        self.sensor_panels = ['settings, color, buffalo']  # TODO
+        self.panel_requests = {'sensor': 'all', 'stage': 'all'}
         self.view_panel = ViewPanel(self)
         self.layout = {
             'init_funcs': [],
