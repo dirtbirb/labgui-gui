@@ -1,6 +1,7 @@
 import threading
 import wx
 from queue import Queue
+from time import sleep, time
 
 try:
     import numpy as np
@@ -17,11 +18,11 @@ pad = 25
 pad_inner = 3
 pad_outer = 10
 sz_img = (1280, 800)
-sz_thumb = (128, 80)
+sz_thumb = (128, 86)
 sz_btn = (2*pad, 2*pad)
 sz1 = (2*pad, pad)
-wd1 = (2*pad, -1)
 ht1 = (-1, pad)
+wd2 = (3*pad, -1)
 sz2 = (3*pad, pad)
 sz3 = (4*pad, pad)
 span1 = wx.GBSpan(1, 1)
@@ -70,6 +71,11 @@ def get_top_px(img, n=1):
 def is_color(img):
     ''' Return True if image contains a color channel, False otherwise '''
     return len(img.shape) == 3
+
+
+def test_image(shape=sz_img[::-1]):
+    ''' Generate random uint8 image of given shape '''
+    return np.random.randint(0, 256, shape, np.uint8)
 
 
 # wx.Dialog -------------------------------------------------------------------
@@ -136,15 +142,53 @@ def FileDialog(msg, ext=None, save=False):
 #
 #     return wrapped_func
 
+
+class NullDevice(object):
+    def __init__(self, queue=None):
+        super().__init__()
+
+    def make_panels(self, parent):
+        return []
+
+    def start(self):
+        pass
+
+    def close(self):
+        pass
+
+
+class TestSensor(NullDevice):
+    def __init__(self, queue):
+        super().__init__()
+        self.img_queue = queue
+        self.img_thread = None
+        self.running = False
+        self.start()
+
+    def start(self):
+
+        def img_loop():
+            while self.running:
+                self.img_queue.put(test_image())
+                sleep(0.03)
+
+        self.running = True
+        self.img_thread = threading.Thread(target=img_loop)
+        self.img_thread.daemon = True
+        self.img_thread.start()
+
+    def close(self):
+        self.running = False
+        if self.img_thread:
+            self.img_thread = None
+
+
 class GuiImage(wx.Window):
     ''' Basic wx Window for painting images on '''
 
-    def __init__(self, *args, **kwargs):
-        # Default size
-        if 'size' not in kwargs:
-            kwargs['size'] = sz_img
-        super().__init__(*args, **kwargs)
-        # Default background color
+    def __init__(self, *args, size=sz_img, **kwargs):
+        super().__init__(*args, size=size, **kwargs)
+        self.SetMinClientSize(size)
         self.SetBackgroundColour(bg_img)
 
     # def display(window, img, img_done_flag, dc_processes=[]):
@@ -189,14 +233,15 @@ class GuiPanel(wx.Panel):
         # If attribute "name" is a wx object...
         elem = object.__getattribute__(self, name)
         if isinstance(elem, wx.Object):
-            # Return floats from numerical values, strings otherwise
+            # Return content of TextCtrl, as float if possible
+            # Return state of ToggleButton
             if isinstance(elem, (wx.TextCtrl, wx.ToggleButton)):
                 return to_float(elem.GetValue())
-            # Return numerical index from Choice, ComboBox, RadioBox
-            # HACK: Can't retrieve string selection!
+            # Return index of Choice, ComboBox, RadioBox
+            # HACK: This prevents GetStringSelection, use GetElement for that
             elif isinstance(elem, wx.ItemContainerImmutable):
                 return elem.GetSelection()
-            # Return text value of StaticText
+            # Return text value of StaticText, as float if possible
             elif isinstance(elem, wx.StaticText):
                 return to_float(elem.GetLabel())
         # Return anything else as normal
@@ -251,7 +296,7 @@ class GuiPanel(wx.Panel):
     #     self.Bind(name, event, bind_func)
 
     def GetElement(self, name):
-        ''' Bypass custom __getattribute__ '''
+        ''' Bypass custom __getattribute__ to return a wx object '''
         return object.__getattribute__(self, name)
 
     def MakeLabel(self):
@@ -269,63 +314,70 @@ class ViewPanel(GuiPanel):
 
     def __init__(self, *args, name='View', **kwargs):
         super().__init__(*args, name=name, **kwargs)
+        self.parent = self.GetParent()
 
-        self.inserted_panels = []
+        # Background attributes
+        self.device_panels = []
+        self.frames = 0
+        self.full_window = FullscreenFrame(self)
         self.video_writer = None
 
-        source = wx.Choice(self)
-        play_btn = wx.ToggleButton(self, label='Play', size=sz1)
-        full_btn = wx.Button(self, label='Full', size=sz1)
-        save_lbl = wx.StaticText(self, label='Save')
-        save_img_btn = wx.Button(self, label='Image', size=sz1)
-        save_vid_btn = wx.ToggleButton(self, label='Video', size=sz1)
+        # Make GUI elements
+        source = wx.Choice(self, size=wd2)
+        play_btn = wx.ToggleButton(self, label='Start', size=sz1)
+        full_btn = wx.ToggleButton(self, label='Full', size=sz1)
+        save_img_btn = wx.Button(self, label='Save', size=sz1)
+        save_vid_btn = wx.ToggleButton(self, label='Record', size=sz1)
+        fps_lbl = wx.StaticText(self, label='FPS ')
+        fps = wx.StaticText(self, label='-')
 
+        # Assemble GUI elements
+        self.MakeSizerAndFit(
+            (self.MakeLabel(), wx.GBPosition(0, 0), span2),
+            (source, wx.GBPosition(1, 0), span2, wx.EXPAND),
+            (play_btn, wx.GBPosition(2, 0), span1, wx.EXPAND),
+            (full_btn, wx.GBPosition(2, 1), span1, wx.EXPAND),
+            (save_img_btn, wx.GBPosition(3, 0), span1, wx.EXPAND),
+            (save_vid_btn, wx.GBPosition(3, 1), span1, wx.EXPAND),
+            (fps_lbl, wx.GBPosition(4, 0), span1, ALIGN_CENTER_RIGHT),
+            (fps, wx.GBPosition(4, 1)))
+
+        # Expose GUI elements
+        self.source = source
+        self.play_btn = play_btn
+        self.full_btn = full_btn
+        self.save_img_btn = save_img_btn
+        self.save_vid_btn = save_vid_btn
+        self.fps = fps
+
+        # Bind GUI elements to functions
+        play_btn.Bind(wx.EVT_TOGGLEBUTTON, self.play)
+        full_btn.Bind(wx.EVT_TOGGLEBUTTON, self.fullscreen)
         save_img_btn.Bind(wx.EVT_BUTTON, self.save_img)
         save_vid_btn.Bind(wx.EVT_TOGGLEBUTTON, self.save_vid)
         source.Bind(wx.EVT_CHOICE, self.select_source)
 
-        self.MakeSizerAndFit(
-            (self.MakeLabel(), wx.GBPosition(0, 0), span2),
-            (source, wx.GBPosition(1, 0), span3, wx.EXPAND),
-            (play_btn, wx.GBPosition(2, 1), span1, wx.EXPAND),
-            (full_btn, wx.GBPosition(2, 2), span1, wx.EXPAND),
-            (save_lbl, wx.GBPosition(3, 0), span1, ALIGN_CENTER_RIGHT),
-            (save_img_btn, wx.GBPosition(3, 1), span1, wx.EXPAND),
-            (save_vid_btn, wx.GBPosition(3, 2), span1, wx.EXPAND))
+        # Finish init
+        self.add_source('none', NullDevice)
+        source.SetSelection(0)
+        self.GetParent().img_processes['full'].append(self.save_frame)
 
-        self.source = source
-        self.save_img_btn = save_img_btn
-        self.save_vid_btn = save_vid_btn
-        self.fullscreen = full_btn
+        # FPS (frames per second) counter
+        def fps_loop():
+            def update(f):
+                fps.SetLabel(f)
 
-    def save_img(self, event=None):
-        ''' Save still image via dialog '''
-        parent = self.GetParent()
-        if parent and hasattr(parent, 'image') and parent.image is not None:
-            img = parent.image.copy()
-            fn = FileDialog('Save image', '.png', save=True)
-            if fn:
-                cv2.imwrite(fn, img, (cv2.IMWRITE_PNG_COMPRESSION, 5))
+            wait = self.parent.img_start.wait
+            while True:
+                wait()
+                t0, f0 = time(), self.frames
+                sleep(1)
+                t1, f1 = time(), self.frames
+                wx.CallAfter(update, '{:.2f}'.format((f1 - f0)/(t1 - t0)))
 
-    def save_vid(self, event=None):
-        ''' Start/stop recording, with save dialog '''
-        parent = self.GetParent()
-        if parent and hasattr(parent, 'image') and parent.image is not None:
-            if self.save_vid_btn:       # Start recording (via dialog)
-                fn = FileDialog('Save video', '.avi', save=True)
-                if fn:
-                    codec = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
-                    fps = 10
-                    shape = self.GetParent().image.shape[:2]
-                    self.video_writer = cv2.VideoWriter(fn, codec, fps, shape)
-                else:                   # Cancel recording
-                    self.save_vid_btn = False
-            else:                       # Finish recording
-                if self.video_writer:
-                    self.video_writer.release()
-                self.video_writer = None
-        else:
-            self.save_vid_btn = False
+        fps_thread = threading.Thread(target=fps_loop)
+        fps_thread.daemon = True
+        fps_thread.start()
 
     def add_source(self, name, obj):
         # Append name to GUI, obj to ClientData
@@ -334,7 +386,7 @@ class ViewPanel(GuiPanel):
     def add_sources(self, sources):
         if isinstance(sources, list):   # Add each from the list
             for s in sources:
-                self.add_source(s)
+                self.add_source(*s)
         else:
             self.add_source(sources)    # If not actually a list
 
@@ -342,29 +394,92 @@ class ViewPanel(GuiPanel):
         self.GetElement('source').Delete(index)
 
     def select_source(self, event=None):
-        parent = self.GetParent()
+        parent = self.parent
         layout = parent.layout
         index = self.source
-        obj = self.GetElement(self.source).GetClientData(index)
-        # Create source object
+        obj = self.GetElement('source').GetClientData(index)
+        self.reset()
+        # Remove old panels
+        for old_panel in self.device_panels:
+            old_panel.Destroy()
+            for i, gui_panel in enumerate(layout['bottom']):
+                if isinstance(old_panel, type(gui_panel)):
+                    layout['bottom'].pop(i)
+        self.device_panels = []
+        # Remove old device
+        if self.device:
+            self.device.close()
+            self.device = None
+        # Create new device
         try:
             self.device = obj(parent.img_queue)
         except Exception as e:
             print("Error: couldn't create sensor object. Details:\n", e)
             self.del_source(index)
-            new_panels = []
-        finally:
-            # Remove old panels
-            for old_panel in self.inserted_panels:
-                panel, location = old_panel
-                for i, gui_panel in enumerate(layout[location]):
-                    if type(panel) == type(gui_panel):
-                        layout[location].pop(i)
-        # Add new panels and reassemble GUI
-        new_panels = self.device.make_panels(parent)
-        for i, new_panel in enumerate(new_panels):
-            parent.layout['bottom'].insert(panel, i+1)
+            return
+        # Add new panels
+        self.device_panels = self.device.make_panels(parent)
+        for i, new_panel in enumerate(self.device_panels):
+            layout['bottom'].insert(i+1, new_panel)
+        # Reassemble GUI
         parent.Assemble()
+
+    def reset(self, event=None):
+        if self.full_btn:
+            self.full_btn = False
+            self.fullscreen()
+        if self.play_btn:
+            self.play_btn = False
+            self.play()
+        if self.save_vid_btn:
+            self.save_vid_btn = False
+            self.save_vid()
+
+    def fullscreen(self, event=None):
+        self.full_window.Show(self.full_btn)
+
+    def play(self, event=None):
+        flag = self.parent.img_start
+        if self.play_btn:
+            flag.set()
+        else:
+            flag.clear()
+
+    def save_img(self, event=None):
+        ''' Save still image via dialog '''
+        parent = self.parent
+        if parent and hasattr(parent, 'image') and parent.image is not None:
+            img = parent.image.copy()
+            fn = FileDialog('Save image', '.png', save=True)
+            if fn:
+                cv2.imwrite(fn, img, (cv2.IMWRITE_PNG_COMPRESSION, 5))
+
+    def save_frame(self, img):
+        if self.video_writer:
+            if not is_color(img):
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            self.video_writer.write(img)
+        return img
+
+    def save_vid(self, event=None):
+        ''' Start/stop recording, with save dialog '''
+        flag = self.GetParent().img_start
+        flag.clear()
+        if self.play_btn and self.save_vid_btn:
+            fn = FileDialog('Save video', '.avi', save=True)
+            if fn:                  # Start recording
+                codec = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
+                fps = 10
+                shape = self.GetParent().image.shape[:2][::-1]
+                self.video_writer = cv2.VideoWriter(fn, codec, fps, shape)
+            else:                   # Cancel recording
+                self.save_vid_btn = False
+        else:                       # Finish recording
+            sleep(0.5)  # Make sure the latest image gets processed
+            if self.video_writer:
+                self.video_writer.release()
+            self.video_writer = None
+        flag.set()
 
 
 # Sensor templates
@@ -601,6 +716,7 @@ class ColorPanel(GuiPanel):
         self.sat_val = sat_val
 
         self.set_gamma()
+        self.GetParent().img_processes['resized'].append(self.process_img)
 
     def set_range(self, event=None):
         ''' Validate dynamic range value '''
@@ -637,9 +753,9 @@ class ColorPanel(GuiPanel):
     def colormap_img(self, img):
         ''' Apply selected colormap by index '''
         colormap = self.colormap - 2
-        if colormap > -1:                               # Colormap
+        if colormap > -1:                           # Colormap
             img = cv2.applyColorMap(img, colormap)
-        elif colormap == -2 and is_color(img):    # Force gray
+        elif colormap == -2 and is_color(img):      # Force gray
             img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         return img
 
@@ -712,10 +828,12 @@ class FlatFieldPanel(GuiPanel):
         self.apply = apply
         self.thumb = thumb
 
+        self.GetParent().img_processes['full'].append(self.process_img)
+
     def save(self, event=None):
         ''' Update flat field and thumbnail '''
         # Save camera image
-        self.ff = self.GetParent().cam.img.copy()
+        self.ff = self.GetParent().image.copy()
 
         # Update thumbnail on gui
         thumb = cv2.resize(self.ff, sz_thumb)
@@ -765,8 +883,8 @@ class TargetPanel(GuiPanel):
         x = wx.TextCtrl(self, size=sz1, style=wx.TE_PROCESS_ENTER)
         y = wx.TextCtrl(self, size=sz1, style=wx.TE_PROCESS_ENTER)
         px_lbl = wx.StaticText(self, label='x, y ')
-        px_x = wx.StaticText(self, size=wd1, style=wx.ALIGN_RIGHT)
-        px_y = wx.StaticText(self, size=wd1, style=wx.ALIGN_RIGHT)
+        px_x = wx.StaticText(self, style=wx.ALIGN_RIGHT)
+        px_y = wx.StaticText(self, style=wx.ALIGN_RIGHT)
 
         reset_btn.Bind(wx.EVT_BUTTON, self.reset)
         for elem in (x, y, size):
@@ -794,6 +912,8 @@ class TargetPanel(GuiPanel):
         self.reset_btn = reset_btn
 
         self.reset()
+
+        self.GetParent().img_processes['dc'].append(self.process_dc)
 
     def reset(self, event=None):
         self.target = 0
@@ -883,7 +1003,7 @@ class FullscreenFrame(wx.Frame):
         def on_key(event):
             ''' Exit fullscreen on ESC and inform parent frame '''
             if event.GetKeyCode() == wx.WXK_ESCAPE:
-                self.GetParent().fullscreen = False
+                self.GetParent().full_btn = False
                 self.Hide()
 
         window = wx.Window(self)    # Required to process EVT_KEY_DOWN
@@ -901,142 +1021,129 @@ class BasicGui(wx.Frame):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Visible GUI elements
-        self.image_window = GuiImage(self)
-        self.image_full = FullscreenFrame(self)
-        self.image = np.zeros(sz_img, dtype=np.uint8)
-        self.panel_requests = {'sensor': 'all', 'stage': 'all'}
-        self.view_panel = ViewPanel(self)
-        self.layout = {
-            'init_funcs': [],
-            'left': [],
-            'right': [self.image_window],
-            'bottom': [self.view_panel]}
-
-        # Image display
+        # Image control
         self.frames = 0
         self.img_start = threading.Event()
-        self.img_queue = Queue(2)
-        self.img_processes = {'full': [], 'resized': [], 'dc': []}
-        self.video_writer = None
+        self.img_queue = Queue(1)
+        self.img_processes = {
+            'full': [],
+            'resized': [],
+            'dc': []
+            }
 
+        # GUI elements
+        self.image = np.zeros(sz_img, dtype=np.uint8)
+        self.image_window = GuiImage(self)
+        self.view_panel = ViewPanel(self)
+        # self.panel_requests = {'sensor': 'all', 'stage': 'all'}
+        self.layout = {
+            'left': [],
+            'right': [self.image_window],
+            'bottom': [self.view_panel]
+            }
+
+        # Start display thread
         def display_loop():
             ''' Run method for image display thread '''
 
-            img_start = self.img_start
-            img_queue = self.img_queue
-            image_full = self.image_full
-            image_window = self.image_window
+            # Caching (avoids extra lookups, probably useless)
+            BGR2RGB = cv2.COLOR_BGR2RGB
+            GRAY2RGB = cv2.COLOR_GRAY2RGB
+            cvtColor = cv2.cvtColor
+            resize = cv2.resize
+            Bitmap = wx.Bitmap.FromBuffer
+            CallAfter = wx.CallAfter
+            ClientDC = wx.ClientDC
+            gui_window = self.image_window
+            img_processes = self.img_processes
+            img_get = self.img_queue.get
+            wait = self.img_start.wait
             view_panel = self.view_panel
+            full_window = view_panel.full_window
 
-            def display(window, img):
+            display_queue = Queue(1)
+            display_get = display_queue.get
+            display_put = display_queue.put
+
+            def display(window):
+                ''' Get image and draw to wx window '''
+                sz, img = window.GetSize(), display_get()
                 # Skip frame if resized incorrectly for current window
-                dc, sz = wx.ClientDC(window), window.GetSize()
-                if sz == (img.shape[1], img.shape[0]):
-                    # Draw DC and update display window
-                    dc.DrawBitmap(wx.Bitmap.FromBuffer(*sz, img), 0, 0)
-                    for process in self.img_processes['dc']:
+                if sz == img.shape[:2][::-1]:
+                    # Draw display window and update
+                    dc = ClientDC(window)
+                    dc.DrawBitmap(Bitmap(*sz, img), 0, 0)
+                    for process in img_processes['dc']:
                         process(dc)
                     window.Update()
+                    view_panel.frames += 1
 
             while True:
-                img_start.wait()                # Wait for GUI "start"
-                sensor_img = img_queue.get()    # Wait for available image
-                if sensor_img is None:          # Skip image errors
+                wait()                      # Wait for GUI "start"
+                sensor_img = img_get()      # Wait for available image
+                if sensor_img is None:      # Skip image errors
                     print("Debug: Image queue skipped 'None'")
                     continue
 
-                # Make img available for saving, record frame if recording
-                self.image = sensor_img
-                if view_panel.save_vid_btn:
-                    self.video_writer.write(sensor_img)
-
                 # Full-frame image processing
-                for process in self.img_processes['full']:
+                self.image = sensor_img     # Make image available to panels
+                for process in img_processes['full']:
                     sensor_img = process(sensor_img)
 
                 # Resize to target window
-                if view_panel.fullscreen:
-                    window = image_full
+                if view_panel.full_btn:
+                    window = full_window
                 else:
-                    window = image_window
-                display_img = cv2.resize(sensor_img, tuple(window.GetSize()),
-                                         interpolation=cv2.INTER_NEAREST)
+                    window = gui_window
+                display_img = resize(sensor_img, tuple(window.GetSize()))
 
                 # Resized-frame image processing
-                for process in self.img_processes['resized']:
+                for process in img_processes['resized']:
                     display_img = process(display_img)
 
-                # Convert to RGB and display
+                # Convert to RGB and send to wx
                 if is_color(display_img):   # from BGR (OpenCV native format)
-                    cvt_method = cv2.COLOR_BGR2RGB
+                    cvt_method = BGR2RGB
                 else:                       # from grayscale
-                    cvt_method = cv2.COLOR_GRAY2RGB
-                display_img = cv2.cvtColor(display_img, cvt_method)
-                wx.CallAfter(display, window, display_img)  # thread-safe
-                self.frames += 1
+                    cvt_method = GRAY2RGB
+                display_put(cvtColor(display_img, cvt_method))
+                CallAfter(display, window)  # thread-safe
 
         self.img_thread = threading.Thread(target=display_loop)
         self.img_thread.daemon = True
         self.img_thread.start()
 
-    def Assemble(self, layout=None):
-        layout = self.layout or layout
+    def Assemble(self):
 
         def add_module(parent, module, padding=pad):
             ''' Add module (panel or sizer) to parent sizer with padding '''
             parent.Add(module)
             parent.AddSpacer(padding)
 
-        def construct_sizer(orientation, modules, padding=pad):
+        def construct_panel(orientation, modules, padding=pad):
             ''' Build sizer from modules with given orientation and padding '''
             sizer = wx.BoxSizer(orientation)
             if len(modules) > 0:
                 if orientation == wx.VERTICAL:
                     sizer.AddSpacer(pad_outer)
-                for m in modules[:-1]:
-                    add_module(sizer, m, padding)
+                for module in modules[:-1]:
+                    add_module(sizer, module, padding)
                 add_module(sizer, modules[-1], pad_outer)
             return sizer
 
-        # Initiallize GUI elements
-        for func in layout['init_funcs']:
-            func()
-
         # Assemble GUI elements
-        left_szr = construct_sizer(wx.VERTICAL, layout['left'])
-        bot_szr = construct_sizer(wx.HORIZONTAL, layout['bottom'])
+        layout = self.layout
+        gui_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        left_szr = construct_panel(wx.VERTICAL, layout['left'])
+        bot_szr = construct_panel(wx.HORIZONTAL, layout['bottom'])
         layout['right'].append(bot_szr)
-        right_szr = construct_sizer(wx.VERTICAL, layout['right'], pad_outer)
+        right_szr = construct_panel(wx.VERTICAL, layout['right'], pad_outer)
+        layout['right'].pop()   # allow bot_szr to be deleted on Assemble()
 
         # Assemble GUI
-        gui_sizer = wx.BoxSizer(wx.HORIZONTAL)
         gui_sizer.AddSpacer(pad_outer)
         add_module(gui_sizer, left_szr, pad_outer)
         add_module(gui_sizer, right_szr, pad_outer)
-        self.SetSizerAndFit(gui_sizer)
+        self.SetSizerAndFit(gui_sizer, deleteOld=True)
+        self.Layout()
         self.Show()
-
-    # def AddDevice(self, device):
-    #     if self.panels == 'all':
-    #         for panel in device.panels:
-    #             name, location = panel
-    #             self.layout[location].insert(1, panel)
-    #     else:
-    #         for panel in self.panels:
-    #             name, location = panel
-    #             if panel in device.panels:
-    #                 self.layout[location].insert(1, panel)
-
-
-class HardwareGui(BasicGui):
-    ''' BasicGui with support for adding/removing hardware control panels.
-        Stages go on left bar, sensors go on bottom bar. '''
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.panels = {'stages': [], 'sensors': []}
-
-    def update_panels(self):
-        ''' Rebuild GUI from self.panels '''
-        pass
