@@ -47,7 +47,12 @@ def make_binding(obj, func):
         except ValueError:  # HACK: Reject '' or any non-numeric string
             val = None
         # Set parameter if given, update GUI with current value
-        obj.SetValue(str(func(val)))
+        ret = func(val)
+        if ret is False:
+            ret = ''
+        else:
+            ret = str(ret)
+        obj.SetValue(ret)
 
     def item_container_binding(event):
         # Set parameter if given, update GUI with current value
@@ -89,7 +94,7 @@ def top_px_avg(img, n=3):
     return ret
 
 
-def validate(v, mn=0, mx=255):
+def limit(v, mn=0, mx=255):
     ''' Limit a number to given range '''
     return max(min(v, mx), mn)
 
@@ -288,13 +293,25 @@ class GuiPanel(wx.Panel):
                 control.SetValue('')
             elif isinstance(control, wx.ToggleButton):
                 control.SetValue(False)
-            elif isinstance(control, wx.ItemContainerImmutable):
-                control.SetSelection(0)
+            # elif isinstance(control, wx.ItemContainerImmutable):
+            #     control.SetSelection(0)
 
     def update(self, event=None):
         self.reset()
         for control in self.controls:
-            wx.PostEvent(control, wx.EVT_COMMAND)
+            if isinstance(control, wx.TextCtrl):
+                evt = wx.EVT_TEXT_ENTER
+            elif isinstance(control, wx.ToggleButton):
+                evt = wx.EVT_TOGGLEBUTTON
+            # elif isinstance(control, wx.RadioBox):
+            #     evt = wx.EVT_RADIOBOX
+            else:
+                continue
+            event = wx.PyCommandEvent(evt.typeId, control.GetId())
+            control.GetEventHandler().ProcessEvent(event)
+
+    def validate(self, event=None):
+        pass
 
 
 class ViewPanel(GuiPanel):
@@ -359,6 +376,8 @@ class ViewPanel(GuiPanel):
 
             wait = self.parent.img_start.wait
             while True:
+                if not self.device or self.device.running:
+                    wx.CallAfter(update, '-')
                 wait()
                 f0 = self.frames
                 sleep(1)
@@ -368,6 +387,7 @@ class ViewPanel(GuiPanel):
         fps_thread.daemon = True
         fps_thread.start()
 
+    # Manage sources -------------------------------
     def add_source(self, name, obj):
         # Append name to GUI, obj to ClientData
         self.GetElement('source').Append(name, obj)
@@ -400,7 +420,11 @@ class ViewPanel(GuiPanel):
         if self.device:                     # Remove device
             self.device.close()
             self.device = None
-        while not img_queue.empty():        # Purge any remaining frames
+            parent.img_processes = {        # Reset image processes
+                'full': [self.save_frame],
+                'resized': [],
+                'dc': []}
+        while not img_queue.empty():        # Purge any queued frames
             img_queue.get(False)
         # Create new device
         new_device = self.GetElement('source').GetClientData(source_index)
@@ -417,17 +441,7 @@ class ViewPanel(GuiPanel):
         # Reassemble GUI
         parent.Assemble()
 
-    def reset(self, event=None):
-        if self.full_btn:
-            self.full_btn = False
-            self.fullscreen()
-        if self.play_btn:
-            self.play_btn = False
-            self.play()
-        if self.save_vid_btn:
-            self.save_vid_btn = False
-            self.save_vid()
-
+    # Manage display -------------------------------
     def fullscreen(self, event=None):
         self.full_window.Show(self.full_btn)
 
@@ -474,6 +488,20 @@ class ViewPanel(GuiPanel):
             self.video_writer = None
         flag.set()      # Continue capture
 
+    # GuiPanel methods -----------------------------
+    def reset(self, event=None):
+        if self.full_btn:
+            self.full_btn = False
+            self.fullscreen()
+        if self.play_btn:
+            self.play_btn = False
+            self.play()
+        if self.save_vid_btn:
+            self.save_vid_btn = False
+            self.save_vid()
+        for panel in self.device_panels:
+            panel.reset()
+
     def update(self, event=None):
         for panel in self.device_panels:
             panel.update()
@@ -481,15 +509,7 @@ class ViewPanel(GuiPanel):
 
 # Sensor templates
 
-class SettingsPanel(GuiPanel):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def update(self, event=None):
-        print("Got update!")
-
-
-class RoiPanel(SettingsPanel):
+class RoiPanel(GuiPanel):
     ''' ROI (Region Of Interest) control '''
 
     def __init__(self, *args, name='ROI', **kwargs):
@@ -498,11 +518,11 @@ class RoiPanel(SettingsPanel):
         offset_lbl = wx.StaticText(self, label='Offset')
         size_lbl = wx.StaticText(self, label='Size')
         x_lbl = wx.StaticText(self, label='x')
-        x = wx.TextCtrl(self, value='0.0', size=SZ1, style=wx.TE_PROCESS_ENTER)
-        w = wx.TextCtrl(self, value='1.0', size=SZ1, style=wx.TE_PROCESS_ENTER)
+        x = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
+        w = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
         y_lbl = wx.StaticText(self, label='y')
-        y = wx.TextCtrl(self, value='0.0', size=SZ1, style=wx.TE_PROCESS_ENTER)
-        h = wx.TextCtrl(self, value='1.0', size=SZ1, style=wx.TE_PROCESS_ENTER)
+        y = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
+        h = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
         apply = wx.Button(self, label='Set', size=SZ1)
         load = wx.Button(self, label='Load', size=SZ1)
 
@@ -527,16 +547,12 @@ class RoiPanel(SettingsPanel):
         self.y = y
         self.h = h
         self.controls = [apply, load, x, w, y, h]
+        self.reset()
 
         def roi(event=None):
-            if not self.device:
+            self.validate()
+            if not self.device or not self.device.running:
                 return
-
-            self.x = validate(self.x, mx=1)
-            self.y = validate(self.y, mx=1)
-            self.w = validate(self.w, mn=self.x, mx=1)
-            self.h = validate(self.h, mn=self.y, mx=1)
-
             self.x, self.y, self.w, self.h = self.device.roi(
                 (self.x, self.y, self.w, self.h))
 
@@ -548,8 +564,29 @@ class RoiPanel(SettingsPanel):
         # load.Bind(wx.EVT_BUTTON, self.set_roi)
         load.Disable()
 
+    def reset(self, event=None):
+        self.x = 0.0
+        self.y = 0.0
+        self.w = 1.0
+        self.h = 1.0
+        self.apply = False
 
-class TextSettingsPanel(SettingsPanel):
+    def update(self, event=None):
+        apply = self.apply
+        self.reset()
+        self.apply = apply
+
+    def validate(self, event=None):
+        try:
+            self.x = limit(self.x, mx=1)
+            self.y = limit(self.y, mx=1)
+            self.w = limit(self.w, mn=self.x, mx=1)
+            self.h = limit(self.h, mn=self.y, mx=1)
+        except (ValueError, TypeError):
+            self.reset()
+
+
+class TextSettingsPanel(GuiPanel):
     ''' Sensor settings panel
         Provides build_settings as a helper method to create control panels
         from a list of settings. '''
@@ -708,8 +745,9 @@ class ColorPanel(GuiPanel):
         self.gamma_val = gamma_val
         self.sat_btn = sat_btn
         self.sat_val = sat_val
-        self.controls = [colormap, range_btn, range_val, gamma_btn, gamma_val,
-            sat_btn, sat_val]
+        self.controls = [
+            colormap, range_btn, range_val, gamma_btn, gamma_val, sat_btn,
+            sat_val]
 
         self.set_gamma()
         self.GetParent().img_processes['resized'].append(self.process_img)
@@ -718,7 +756,7 @@ class ColorPanel(GuiPanel):
         ''' Validate dynamic range value '''
         if self.range_btn:
             try:
-                v = validate(int(self.range_val))
+                v = limit(int(self.range_val))
             except ValueError:
                 v = 255
             self.range_val = v
@@ -728,7 +766,7 @@ class ColorPanel(GuiPanel):
         if self.gamma_btn:
             try:
                 # Validate
-                gamma = validate(self.gamma_val, 0.0, 10.0)
+                gamma = limit(self.gamma_val, 0.0, 10.0)
                 # Create look-up table (LUT)
                 self.gamma_lut = np.array(
                     np.arange(0, 1, 1/256) ** (1/gamma) * 255 + 0.5, np.uint8)
@@ -741,7 +779,7 @@ class ColorPanel(GuiPanel):
         ''' Validate dynamic range value '''
         if self.sat_btn:
             try:
-                v = validate(int(self.sat_val))
+                v = limit(int(self.sat_val))
             except ValueError:
                 v = 255
             self.sat_val = v
