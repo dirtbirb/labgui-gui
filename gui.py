@@ -38,6 +38,29 @@ def is_color(img):
     return len(img.shape) == 3
 
 
+def make_binding(obj, func):
+    def textctrl_binding(event):
+        val = obj.GetValue()
+        try:
+            val = float(val)
+        except ValueError:  # HACK: Reject '' or any non-numeric string
+            val = None
+        # Set parameter if given, update GUI with current value
+        obj.SetValue(str(func(val)))
+
+    def item_container_binding(event):
+        # Set parameter if given, update GUI with current value
+        obj.SetSelection(func(obj.GetSelection()))
+
+    if isinstance(obj, wx.TextCtrl):
+        binding = textctrl_binding
+    elif isinstance(obj, wx.ItemContainerImmutable):
+        binding = item_container_binding
+    else:
+        raise TypeError("Can't make binding for {}".format(type(obj)))
+    return binding
+
+
 def to_float(value):
     ''' Try to convert string to float; return string if failed '''
     try:
@@ -99,22 +122,22 @@ class TestSensor(NullDevice):
         self.running = False
         self.start()
 
-        def start(self):
+    def start(self):
 
-            def img_loop():
-                while self.running:
-                    self.img_queue.put(test_image())
-                    sleep(0.03)
+        def img_loop():
+            while self.running:
+                self.img_queue.put(test_image())
+                sleep(0.03)
 
-                    self.running = True
-                    self.img_thread = threading.Thread(target=img_loop)
-                    self.img_thread.daemon = True
-                    self.img_thread.start()
+        self.running = True
+        self.img_thread = threading.Thread(target=img_loop)
+        self.img_thread.daemon = True
+        self.img_thread.start()
 
-        def close(self):
-            self.running = False
-            if self.img_thread:
-                self.img_thread = None
+    def close(self):
+        self.running = False
+        if self.img_thread:
+            self.img_thread = None
 
 
 # wx.Object (misc stuff) ------------------------------------------------------
@@ -513,18 +536,6 @@ class SettingsPanel(GuiPanel):
             Sets panel attributes, binds functions, and returns GUI elements:
                 [(StaticText label, TextCtrl value, StaticText units)...] '''
 
-        def make_binding(func):
-            def binding(event):
-                obj = event.GetEventObject()
-                val = obj.GetValue()
-                try:
-                    val = float(val)
-                except ValueError:  # HACK: Reject '' or any non-numeric string
-                    val = None
-                # Set parameter if given, update GUI with current value
-                obj.SetValue(str(func(val)))
-            return binding
-
         if not isinstance(textctrls, list):
             raise TypeError("SettingsPanel.build_column() requires a list")
 
@@ -533,7 +544,8 @@ class SettingsPanel(GuiPanel):
         for param, units, func in textctrls:
             # Create GUI elements
             label = wx.StaticText(self, label=param)
-            field = wx.TextCtrl(self, size=SZ2, style=wx.TE_PROCESS_ENTER)
+            field = wx.TextCtrl(
+                self, size=SZ2, value='', style=wx.TE_PROCESS_ENTER)
             units = wx.StaticText(self, label=units)
             # Add GUI layout
             elements.extend([
@@ -542,7 +554,7 @@ class SettingsPanel(GuiPanel):
                 (units, wx.GBPosition(i, j+2), SP1,
                     wx.ALIGN_CENTER_VERTICAL)])
             # Bind function to ctrl
-            field.Bind(wx.EVT_TEXT_ENTER, make_binding(func))
+            field.Bind(wx.EVT_TEXT_ENTER, make_binding(field, func))
             # Expose ctrl as panel attribute
             self.__setattr__(param.lower().replace(' ', '_'), field)
             i += 1
@@ -1099,5 +1111,5 @@ class GuiFrame(wx.Frame):
         add_module(gui_sizer, left_szr, PX_PAD_OUTER)
         add_module(gui_sizer, right_szr, PX_PAD_OUTER)
         self.SetSizerAndFit(gui_sizer, deleteOld=True)
-        self.Layout()   # HACK: Sometimes this doesn't trigger automatically?
+        self.Layout()   # HACK: Sometimes doesn't trigger in SetSizerAndFit?
         self.Show()
