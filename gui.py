@@ -1,44 +1,41 @@
+import cv2
+import numpy as np
 import threading
 import wx
 from queue import Queue
-from time import sleep, time
-
-try:
-    import numpy as np
-except ImportError:
-    pass
-
-try:
-    import cv2
-except ImportError:
-    pass
-
-# Constants for GUI construction
-pad = 25
-pad_inner = 3
-pad_outer = 10
-sz_img = (1280, 800)
-sz_thumb = (128, 86)
-sz_btn = (2*pad, 2*pad)
-sz1 = (2*pad, pad)
-ht1 = (-1, pad)
-wd2 = (3*pad, -1)
-sz2 = (3*pad, pad)
-sz3 = (4*pad, pad)
-span1 = wx.GBSpan(1, 1)
-span2 = wx.GBSpan(1, 2)
-span3 = wx.GBSpan(1, 3)
-ALIGN_CENTER_RIGHT = wx.ALIGN_RIGHT + wx.ALIGN_CENTER_VERTICAL
-bg_img = wx.Colour(0, 0, 0).MakeDisabled()
+from time import sleep
 
 
+# Constants -------------------------------------------------------------------
+
+PX_PAD = 25
+PX_PAD_INNER = 3
+PX_PAD_OUTER = 10
+SZ_IMAGE = (1280, 800)
+SZ_THUMB = (128, 86)
+SZ_BTN = (2*PX_PAD, 2*PX_PAD)
+SZ1 = (2*PX_PAD, PX_PAD)
+HT1 = (-1, PX_PAD)
+WD2 = (3*PX_PAD, -1)
+SZ2 = (3*PX_PAD, PX_PAD)
+SZ3 = (4*PX_PAD, PX_PAD)
+SP1 = wx.GBSpan(1, 1)
+SP2 = wx.GBSpan(1, 2)
+SP3 = wx.GBSpan(1, 3)
+ALIGN_CENTER_RIGHT = wx.ALIGN_RIGHT | wx.ALIGN_CENTER_VERTICAL
+CLR_BG = wx.Colour(0, 0, 0).MakeDisabled()
+
+
+# Helper functions ------------------------------------------------------------
+
+# TODO: make actual debug function
 def debug(msg):
-    # TODO: make actual debug function
     print(msg)
 
 
-def validate(v, mn=0, mx=255):
-    return max(min(v, mx), mn)
+def is_color(img):
+    ''' Return True if image contains a color channel, False otherwise '''
+    return len(img.shape) == 3
 
 
 def to_float(value):
@@ -50,16 +47,7 @@ def to_float(value):
     return value
 
 
-def average_top_px(img, n=3):
-    ''' Return average of top n pixels from an image '''
-    if n == 1:
-        ret = img.max()
-    else:
-        ret = np.partition(img.flatten(), -n)[-n:].mean()
-    return ret
-
-
-def get_top_px(img, n=1):
+def top_px(img, n=1):
     ''' Return top nth pixel from an image '''
     if n == 1:
         ret = img.max()
@@ -68,14 +56,89 @@ def get_top_px(img, n=1):
     return ret
 
 
-def is_color(img):
-    ''' Return True if image contains a color channel, False otherwise '''
-    return len(img.shape) == 3
+def top_px_avg(img, n=3):
+    ''' Return average of top n pixels from an image '''
+    if n == 1:
+        ret = img.max()
+    else:
+        ret = np.partition(img.flatten(), -n)[-n:].mean()
+    return ret
 
 
-def test_image(shape=sz_img[::-1]):
+def validate(v, mn=0, mx=255):
+    ''' Limit a number to given range '''
+    return max(min(v, mx), mn)
+
+
+# Fake devices ----------------------------------------------------------------
+
+def test_image(shape=SZ_IMAGE[::-1]):
     ''' Generate random uint8 image of given shape '''
     return np.random.randint(0, 256, shape, np.uint8)
+
+
+class NullDevice(object):
+    def __init__(self, queue=None):
+        super().__init__()
+
+    def make_panels(self, parent):
+        return []
+
+    def start(self):
+        pass
+
+    def close(self):
+        pass
+
+
+class TestSensor(NullDevice):
+    def __init__(self, queue):
+        super().__init__()
+        self.img_queue = queue
+        self.img_thread = None
+        self.running = False
+        self.start()
+
+        def start(self):
+
+            def img_loop():
+                while self.running:
+                    self.img_queue.put(test_image())
+                    sleep(0.03)
+
+                    self.running = True
+                    self.img_thread = threading.Thread(target=img_loop)
+                    self.img_thread.daemon = True
+                    self.img_thread.start()
+
+        def close(self):
+            self.running = False
+            if self.img_thread:
+                self.img_thread = None
+
+
+# wx.Object (misc stuff) ------------------------------------------------------
+
+class ImageWindow(wx.Window):
+    ''' Basic wx Window for painting images on '''
+
+    def __init__(self, *args, size=SZ_IMAGE, **kwargs):
+        super().__init__(*args, size=size, **kwargs)
+        self.SetMinClientSize(size)
+        self.SetBackgroundColour(CLR_BG)
+
+
+class GuiSizer(wx.GridBagSizer):
+    ''' wx GridBagSizer that accepts list of elements to build from '''
+
+    def __init__(self, *items, hpad=None, vpad=None):
+        super().__init__(hpad or PX_PAD_INNER, vpad or PX_PAD_INNER)
+        for item in items:
+            self.Add(*item)
+
+    def AddList(sizer, *items):
+        for item in items:
+            sizer.Add(*item)
 
 
 # wx.Dialog -------------------------------------------------------------------
@@ -116,106 +179,13 @@ def FileDialog(msg, ext=None, save=False):
     else:
         style = wx.FD_OPEN
     dlg = wx.FileDialog(None, msg, wildcard='*'+ext, style=style)
-    if dlg.ShowModal() == wx.ID_OK:
+    if dlg.ShowModal() == wx.ID_OK:     # If clicked "Save" or "Open"
         fn = dlg.GetPath()
-        if ext and not fn[-4:] in (ext, ext.lower(), ext.upper()):
+        if ext and not fn[-4:].lower() == ext.lower():
             fn += ext
-    else:
+    else:                               # If clicked "Cancel"
         fn = False
     return fn
-
-
-# Misc ------------------------------------------------------------------------
-# def func_wrap(function):
-#     ''' Wrap an arbitrary function to read/set a GUI element '''
-#
-#     def wrapped_func(event):
-#         # Get value to set, if any
-#         obj = event.GetEventObject()
-#         val = obj.GetValue()
-#         try:
-#             val = float(val)
-#         except ValueError:
-#             val = None
-#         # Send parameter if given, update GUI with new value either way
-#         obj.SetValue(str(function(val)))
-#
-#     return wrapped_func
-
-
-class NullDevice(object):
-    def __init__(self, queue=None):
-        super().__init__()
-
-    def make_panels(self, parent):
-        return []
-
-    def start(self):
-        pass
-
-    def close(self):
-        pass
-
-
-class TestSensor(NullDevice):
-    def __init__(self, queue):
-        super().__init__()
-        self.img_queue = queue
-        self.img_thread = None
-        self.running = False
-        self.start()
-
-    def start(self):
-
-        def img_loop():
-            while self.running:
-                self.img_queue.put(test_image())
-                sleep(0.03)
-
-        self.running = True
-        self.img_thread = threading.Thread(target=img_loop)
-        self.img_thread.daemon = True
-        self.img_thread.start()
-
-    def close(self):
-        self.running = False
-        if self.img_thread:
-            self.img_thread = None
-
-
-class GuiImage(wx.Window):
-    ''' Basic wx Window for painting images on '''
-
-    def __init__(self, *args, size=sz_img, **kwargs):
-        super().__init__(*args, size=size, **kwargs)
-        self.SetMinClientSize(size)
-        self.SetBackgroundColour(bg_img)
-
-    # def display(window, img, img_done_flag, dc_processes=[]):
-    #     ''' Thread-safe method for wx portion of image display '''
-    #     # Skip frame if resized incorrectly for current window
-    #     dc, sz = wx.ClientDC(window), window.GetSize()
-    #     if sz == (img.shape[1], img.shape[0]):
-    #         # Draw image
-    #         dc.DrawBitmap(wx.Bitmap.FromBuffer(*sz, img), 0, 0)
-    #         for process in dc_processes:
-    #             process(dc)
-    #         # Show on GUI
-    #         window.Update()
-    #     img_done_flag.set()
-
-
-class GuiSizer(wx.GridBagSizer):
-    ''' wx GridBagSizer with default padding '''
-
-    def __init__(self, *items, hpad=None, vpad=None):
-        super().__init__(hpad or pad_inner, vpad or pad_inner)
-        for item in items:
-            self.Add(*item)
-
-    def AddList(sizer, *items):
-        for item in items:
-            sizer.Add(*item)
 
 
 # wx.Panel --------------------------------------------------------------------
@@ -234,7 +204,7 @@ class GuiPanel(wx.Panel):
         elem = object.__getattribute__(self, name)
         if isinstance(elem, wx.Object):
             # Return content of TextCtrl, as float if possible
-            # Return state of ToggleButton
+            # Return state of ToggleButton (HACK: as float, but whatever)
             if isinstance(elem, (wx.TextCtrl, wx.ToggleButton)):
                 return to_float(elem.GetValue())
             # Return index of Choice, ComboBox, RadioBox
@@ -276,25 +246,6 @@ class GuiPanel(wx.Panel):
         # Set anything else as normal
         object.__setattr__(self, name, value)
 
-    # def Bind(self, name, event, func):
-    #     ''' Bypass custom getattr/setattr to bind external functions '''
-    #     object.__getattribute__(self, name).Bind(event, func)
-    #
-    # def BindControl(self, name, event, ext_func):
-    #     ''' Wrap function with GUI element to read from / display to '''
-    #
-    #     def bind_func(event):
-    #         # Get value to set, if any
-    #         val = self.__getattribute__(name)
-    #         try:
-    #             val = float(val)
-    #         except ValueError:      # HACK: Can't send strings
-    #             val = None
-    #         # Set parameter if given, update GUI with current value
-    #         self.__setattr__(name, ext_func(val))
-    #
-    #     self.Bind(name, event, bind_func)
-
     def GetElement(self, name):
         ''' Bypass custom __getattribute__ to return a wx object '''
         return object.__getattribute__(self, name)
@@ -323,23 +274,23 @@ class ViewPanel(GuiPanel):
         self.video_writer = None
 
         # Make GUI elements
-        source = wx.Choice(self, size=wd2)
-        play_btn = wx.ToggleButton(self, label='Start', size=sz1)
-        full_btn = wx.ToggleButton(self, label='Full', size=sz1)
-        save_img_btn = wx.Button(self, label='Save', size=sz1)
-        save_vid_btn = wx.ToggleButton(self, label='Record', size=sz1)
+        source = wx.Choice(self, size=WD2)
+        play_btn = wx.ToggleButton(self, label='Start', size=SZ1)
+        full_btn = wx.ToggleButton(self, label='Full', size=SZ1)
+        save_img_btn = wx.Button(self, label='Save', size=SZ1)
+        save_vid_btn = wx.ToggleButton(self, label='Record', size=SZ1)
         fps_lbl = wx.StaticText(self, label='FPS ')
         fps = wx.StaticText(self, label='-')
 
         # Assemble GUI elements
         self.MakeSizerAndFit(
-            (self.MakeLabel(), wx.GBPosition(0, 0), span2),
-            (source, wx.GBPosition(1, 0), span2, wx.EXPAND),
-            (play_btn, wx.GBPosition(2, 0), span1, wx.EXPAND),
-            (full_btn, wx.GBPosition(2, 1), span1, wx.EXPAND),
-            (save_img_btn, wx.GBPosition(3, 0), span1, wx.EXPAND),
-            (save_vid_btn, wx.GBPosition(3, 1), span1, wx.EXPAND),
-            (fps_lbl, wx.GBPosition(4, 0), span1, ALIGN_CENTER_RIGHT),
+            (self.MakeLabel(), wx.GBPosition(0, 0), SP2),
+            (source, wx.GBPosition(1, 0), SP2, wx.EXPAND),
+            (play_btn, wx.GBPosition(2, 0), SP1, wx.EXPAND),
+            (full_btn, wx.GBPosition(2, 1), SP1, wx.EXPAND),
+            (save_img_btn, wx.GBPosition(3, 0), SP1, wx.EXPAND),
+            (save_vid_btn, wx.GBPosition(3, 1), SP1, wx.EXPAND),
+            (fps_lbl, wx.GBPosition(4, 0), SP1, ALIGN_CENTER_RIGHT),
             (fps, wx.GBPosition(4, 1)))
 
         # Expose GUI elements
@@ -370,10 +321,9 @@ class ViewPanel(GuiPanel):
             wait = self.parent.img_start.wait
             while True:
                 wait()
-                t0, f0 = time(), self.frames
+                f0 = self.frames
                 sleep(1)
-                t1, f1 = time(), self.frames
-                wx.CallAfter(update, '{:.2f}'.format((f1 - f0)/(t1 - t0)))
+                wx.CallAfter(update, str(self.frames - f0))
 
         fps_thread = threading.Thread(target=fps_loop)
         fps_thread.daemon = True
@@ -396,8 +346,9 @@ class ViewPanel(GuiPanel):
     def select_source(self, event=None):
         parent = self.parent
         layout = parent.layout
-        index = self.source
-        obj = self.GetElement('source').GetClientData(index)
+        img_queue = parent.img_queue
+        source_index = self.source
+        # Reset ToggleButtons (not source selection)
         self.reset()
         # Remove old panels
         for old_panel in self.device_panels:
@@ -407,15 +358,18 @@ class ViewPanel(GuiPanel):
                     layout['bottom'].pop(i)
         self.device_panels = []
         # Remove old device
-        if self.device:
+        if self.device:                     # Remove device
             self.device.close()
             self.device = None
+        while not img_queue.empty():        # Purge any remaining frames
+            img_queue.get(False)
         # Create new device
+        new_device = self.GetElement('source').GetClientData(source_index)
         try:
-            self.device = obj(parent.img_queue)
+            self.device = new_device(img_queue)
         except Exception as e:
             print("Error: couldn't create sensor object. Details:\n", e)
-            self.del_source(index)
+            self.del_source(source_index)   # Remove device from list on fail
             return
         # Add new panels
         self.device_panels = self.device.make_panels(parent)
@@ -464,7 +418,7 @@ class ViewPanel(GuiPanel):
     def save_vid(self, event=None):
         ''' Start/stop recording, with save dialog '''
         flag = self.GetParent().img_start
-        flag.clear()
+        flag.clear()    # Pause capture
         if self.play_btn and self.save_vid_btn:
             fn = FileDialog('Save video', '.avi', save=True)
             if fn:                  # Start recording
@@ -475,11 +429,11 @@ class ViewPanel(GuiPanel):
             else:                   # Cancel recording
                 self.save_vid_btn = False
         else:                       # Finish recording
-            sleep(0.5)  # Make sure the latest image gets processed
+            sleep(0.5)  # Wait for any frames in the pipeline (unnecessary?)
             if self.video_writer:
                 self.video_writer.release()
             self.video_writer = None
-        flag.set()
+        flag.set()      # Continue capture
 
 
 # Sensor templates
@@ -493,27 +447,27 @@ class RoiPanel(GuiPanel):
         offset_lbl = wx.StaticText(self, label='Offset')
         size_lbl = wx.StaticText(self, label='Size')
         x_lbl = wx.StaticText(self, label='x')
-        x = wx.TextCtrl(self, value='0.0', size=sz1, style=wx.TE_PROCESS_ENTER)
-        w = wx.TextCtrl(self, value='1.0', size=sz1, style=wx.TE_PROCESS_ENTER)
+        x = wx.TextCtrl(self, value='0.0', size=SZ1, style=wx.TE_PROCESS_ENTER)
+        w = wx.TextCtrl(self, value='1.0', size=SZ1, style=wx.TE_PROCESS_ENTER)
         y_lbl = wx.StaticText(self, label='y')
-        y = wx.TextCtrl(self, value='0.0', size=sz1, style=wx.TE_PROCESS_ENTER)
-        h = wx.TextCtrl(self, value='1.0', size=sz1, style=wx.TE_PROCESS_ENTER)
-        apply = wx.Button(self, label='Set', size=sz1)
-        load = wx.Button(self, label='Load', size=sz1)
+        y = wx.TextCtrl(self, value='0.0', size=SZ1, style=wx.TE_PROCESS_ENTER)
+        h = wx.TextCtrl(self, value='1.0', size=SZ1, style=wx.TE_PROCESS_ENTER)
+        apply = wx.Button(self, label='Set', size=SZ1)
+        load = wx.Button(self, label='Load', size=SZ1)
 
         self.MakeSizerAndFit(
-            (self.MakeLabel(), wx.GBPosition(0, 0), span3),
-            (offset_lbl, wx.GBPosition(1, 1), span1,
+            (self.MakeLabel(), wx.GBPosition(0, 0), SP3),
+            (offset_lbl, wx.GBPosition(1, 1), SP1,
                 wx.ALIGN_CENTER_HORIZONTAL),
-            (size_lbl, wx.GBPosition(1, 2), span1, wx.ALIGN_CENTER_HORIZONTAL),
-            (x_lbl, wx.GBPosition(2, 0), span1, ALIGN_CENTER_RIGHT),
-            (x, wx.GBPosition(2, 1), span1),
-            (w, wx.GBPosition(2, 2), span1),
-            (y_lbl, wx.GBPosition(3, 0), span1, ALIGN_CENTER_RIGHT),
-            (y, wx.GBPosition(3, 1), span1),
-            (h, wx.GBPosition(3, 2), span1),
-            (apply, wx.GBPosition(4, 1), span1),
-            (load, wx.GBPosition(4, 2), span1))
+            (size_lbl, wx.GBPosition(1, 2), SP1, wx.ALIGN_CENTER_HORIZONTAL),
+            (x_lbl, wx.GBPosition(2, 0), SP1, ALIGN_CENTER_RIGHT),
+            (x, wx.GBPosition(2, 1), SP1),
+            (w, wx.GBPosition(2, 2), SP1),
+            (y_lbl, wx.GBPosition(3, 0), SP1, ALIGN_CENTER_RIGHT),
+            (y, wx.GBPosition(3, 1), SP1),
+            (h, wx.GBPosition(3, 2), SP1),
+            (apply, wx.GBPosition(4, 1), SP1),
+            (load, wx.GBPosition(4, 2), SP1))
 
         self.apply = apply
         self.load = load
@@ -579,13 +533,13 @@ class SettingsPanel(GuiPanel):
         for param, units, func in textctrls:
             # Create GUI elements
             label = wx.StaticText(self, label=param)
-            field = wx.TextCtrl(self, size=sz2, style=wx.TE_PROCESS_ENTER)
+            field = wx.TextCtrl(self, size=SZ2, style=wx.TE_PROCESS_ENTER)
             units = wx.StaticText(self, label=units)
             # Add GUI layout
             elements.extend([
-                (label, wx.GBPosition(i, j), span1, ALIGN_CENTER_RIGHT),
-                (field, wx.GBPosition(i, j+1), span1, wx.EXPAND),
-                (units, wx.GBPosition(i, j+2), span1,
+                (label, wx.GBPosition(i, j), SP1, ALIGN_CENTER_RIGHT),
+                (field, wx.GBPosition(i, j+1), SP1, wx.EXPAND),
+                (units, wx.GBPosition(i, j+2), SP1,
                     wx.ALIGN_CENTER_VERTICAL)])
             # Bind function to ctrl
             field.Bind(wx.EVT_TEXT_ENTER, make_binding(func))
@@ -614,7 +568,7 @@ class MetricsPanel(GuiPanel):
 
     def build(self):
         self.display = {}
-        new_items = [(self.MakeLabel(), wx.GBPosition(0, 0), span2)]
+        new_items = [(self.MakeLabel(), wx.GBPosition(0, 0), SP2)]
         for name in self.values:
             # Replace 'None' with '-' just to keep it clean
             v = self.values[name]
@@ -627,7 +581,7 @@ class MetricsPanel(GuiPanel):
             label = wx.StaticText(self, label=name + ': ')
             value = wx.StaticText(self, label=v)
             new_items.extend([
-                (label, wx.GBPosition(i, 0), span1, ALIGN_CENTER_RIGHT),
+                (label, wx.GBPosition(i, 0), SP1, ALIGN_CENTER_RIGHT),
                 (value, wx.GBPosition(i, 1))])
             self.display[name] = value
         self.MakeSizerAndFit(*new_items)
@@ -680,15 +634,15 @@ class ColorPanel(GuiPanel):
             'winter')
         colormap = wx.Choice(self, choices=colormaps)
         colormap.SetSelection(1)     # no colormap
-        range_btn = wx.ToggleButton(self, label='Range', size=sz2)
+        range_btn = wx.ToggleButton(self, label='Range', size=SZ2)
         range_val = wx.TextCtrl(
-            self, value='255', size=sz1, style=wx.TE_PROCESS_ENTER)
-        gamma_btn = wx.ToggleButton(self, label='Gamma', size=sz2)
+            self, value='255', size=SZ1, style=wx.TE_PROCESS_ENTER)
+        gamma_btn = wx.ToggleButton(self, label='Gamma', size=SZ2)
         gamma_val = wx.TextCtrl(
-            self, value='2.2', size=sz1, style=wx.TE_PROCESS_ENTER)
-        sat_btn = wx.ToggleButton(self, label='Highlight', size=sz2)
+            self, value='2.2', size=SZ1, style=wx.TE_PROCESS_ENTER)
+        sat_btn = wx.ToggleButton(self, label='Highlight', size=SZ2)
         sat_val = wx.TextCtrl(
-            self, value='255', size=sz1, style=wx.TE_PROCESS_ENTER)
+            self, value='255', size=SZ1, style=wx.TE_PROCESS_ENTER)
 
         range_btn.Bind(wx.EVT_TOGGLEBUTTON, self.set_range)
         range_val.Bind(wx.EVT_TEXT_ENTER, self.set_range)
@@ -698,14 +652,14 @@ class ColorPanel(GuiPanel):
         sat_val.Bind(wx.EVT_TEXT_ENTER, self.set_sat)
 
         self.MakeSizerAndFit(
-            (self.MakeLabel(), wx.GBPosition(0, 0), span2),
-            (colormap, wx.GBPosition(1, 0), span2, wx.EXPAND),
-            (range_btn, wx.GBPosition(2, 0), span1, wx.EXPAND),
-            (range_val, wx.GBPosition(2, 1), span1, wx.EXPAND),
-            (gamma_btn, wx.GBPosition(3, 0), span1, wx.EXPAND),
-            (gamma_val, wx.GBPosition(3, 1), span1, wx.EXPAND),
-            (sat_btn, wx.GBPosition(4, 0), span1, wx.EXPAND),
-            (sat_val, wx.GBPosition(4, 1), span1, wx.EXPAND))
+            (self.MakeLabel(), wx.GBPosition(0, 0), SP2),
+            (colormap, wx.GBPosition(1, 0), SP2, wx.EXPAND),
+            (range_btn, wx.GBPosition(2, 0), SP1, wx.EXPAND),
+            (range_val, wx.GBPosition(2, 1), SP1, wx.EXPAND),
+            (gamma_btn, wx.GBPosition(3, 0), SP1, wx.EXPAND),
+            (gamma_val, wx.GBPosition(3, 1), SP1, wx.EXPAND),
+            (sat_btn, wx.GBPosition(4, 0), SP1, wx.EXPAND),
+            (sat_val, wx.GBPosition(4, 1), SP1, wx.EXPAND))
 
         self.colormap = colormap
         self.range_btn = range_btn
@@ -763,7 +717,7 @@ class ColorPanel(GuiPanel):
         ''' Stretch dynamic range to be from 0 to self.range_val '''
         if self.range_btn:
             img -= img.min()
-            f = self.range_val / get_top_px(img, 20)
+            f = self.range_val / top_px(img, 20)
             img = np.uint8(np.where(img < 255 / f, img * f, 255))
         return img
 
@@ -811,18 +765,18 @@ class FlatFieldPanel(GuiPanel):
 
         self.ff = None  # Flat frame
 
-        thumb = GuiImage(self, size=sz_thumb)
-        save = wx.Button(self, label='Update', size=sz2)
-        apply = wx.ToggleButton(self, label='Apply', size=sz2)
+        thumb = ImageWindow(self, size=SZ_THUMB)
+        save = wx.Button(self, label='Update', size=SZ2)
+        apply = wx.ToggleButton(self, label='Apply', size=SZ2)
 
         save.Bind(wx.EVT_BUTTON, self.save)
         apply.Bind(wx.EVT_TOGGLEBUTTON, self.validate)
 
         self.MakeSizerAndFit(
-            (self.MakeLabel(), wx.GBPosition(0, 0), span2),
-            (thumb, wx.GBPosition(1, 0), span2, wx.ALIGN_CENTER),
-            (save, wx.GBPosition(2, 0), span1),
-            (apply, wx.GBPosition(2, 1), span1))
+            (self.MakeLabel(), wx.GBPosition(0, 0), SP2),
+            (thumb, wx.GBPosition(1, 0), SP2, wx.ALIGN_CENTER),
+            (save, wx.GBPosition(2, 0), SP1),
+            (apply, wx.GBPosition(2, 1), SP1))
 
         self.save = save
         self.apply = apply
@@ -836,13 +790,13 @@ class FlatFieldPanel(GuiPanel):
         self.ff = self.GetParent().image.copy()
 
         # Update thumbnail on gui
-        thumb = cv2.resize(self.ff, sz_thumb)
+        thumb = cv2.resize(self.ff, SZ_THUMB)
         if is_color(thumb):
             thumb = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
         else:
             thumb = cv2.cvtColor(thumb, cv2.COLOR_GRAY2RGB)
         dc = wx.ClientDC(self.thumb)
-        dc.DrawBitmap(wx.Bitmap.FromBuffer(*sz_thumb, thumb), 0, 0)
+        dc.DrawBitmap(wx.Bitmap.FromBuffer(*SZ_THUMB, thumb), 0, 0)
         self.thumb.Update()
 
     def validate(self, event=None):
@@ -867,7 +821,7 @@ class TargetPanel(GuiPanel):
 
     def __init__(self, *args, name='Target', **kwargs):
         super().__init__(*args, name=name, **kwargs)
-        self.img_size = sz_img  # Updated in process_img / process_dc
+        self.img_size = SZ_IMAGE  # Updated in process_img / process_dc
 
         # These can't be initialized at the class level...
         self.target_pen = wx.Pen((0, 200, 0), 2)  # Lime green
@@ -876,12 +830,12 @@ class TargetPanel(GuiPanel):
         self.targets = ('no target', 'crosshair', 'box', 'circle')
         target = wx.Choice(self, choices=self.targets)
         size_lbl = wx.StaticText(self, label='Size ')
-        size = wx.TextCtrl(self, size=sz1, style=wx.TE_PROCESS_ENTER)
+        size = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
         reset_btn = wx.Button(
-            self, label='Reset', size=sz1, style=wx.BU_EXACTFIT)
+            self, label='Reset', size=SZ1, style=wx.BU_EXACTFIT)
         orig_lbl = wx.StaticText(self, label='Origin ')
-        x = wx.TextCtrl(self, size=sz1, style=wx.TE_PROCESS_ENTER)
-        y = wx.TextCtrl(self, size=sz1, style=wx.TE_PROCESS_ENTER)
+        x = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
+        y = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
         px_lbl = wx.StaticText(self, label='x, y ')
         px_x = wx.StaticText(self, style=wx.ALIGN_RIGHT)
         px_y = wx.StaticText(self, style=wx.ALIGN_RIGHT)
@@ -891,17 +845,17 @@ class TargetPanel(GuiPanel):
             elem.Bind(wx.EVT_TEXT_ENTER, self.set_size)
 
         self.MakeSizerAndFit(
-            (self.MakeLabel(), wx.GBPosition(0, 0), span3),
-            (target, wx.GBPosition(1, 0), span3, wx.EXPAND),
-            (size_lbl, wx.GBPosition(2, 0), span1, ALIGN_CENTER_RIGHT),
-            (size, wx.GBPosition(2, 1), span1, wx.EXPAND),
-            (reset_btn, wx.GBPosition(2, 2), span1, wx.EXPAND),
-            (orig_lbl, wx.GBPosition(3, 0), span1, ALIGN_CENTER_RIGHT),
-            (x, wx.GBPosition(3, 1), span1, wx.EXPAND),
-            (y, wx.GBPosition(3, 2), span1, wx.EXPAND),
-            (px_lbl, wx.GBPosition(4, 0), span1, ALIGN_CENTER_RIGHT),
-            (px_x, wx.GBPosition(4, 1), span1, ALIGN_CENTER_RIGHT | wx.EXPAND),
-            (px_y, wx.GBPosition(4, 2), span1, ALIGN_CENTER_RIGHT | wx.EXPAND))
+            (self.MakeLabel(), wx.GBPosition(0, 0), SP3),
+            (target, wx.GBPosition(1, 0), SP3, wx.EXPAND),
+            (size_lbl, wx.GBPosition(2, 0), SP1, ALIGN_CENTER_RIGHT),
+            (size, wx.GBPosition(2, 1), SP1, wx.EXPAND),
+            (reset_btn, wx.GBPosition(2, 2), SP1, wx.EXPAND),
+            (orig_lbl, wx.GBPosition(3, 0), SP1, ALIGN_CENTER_RIGHT),
+            (x, wx.GBPosition(3, 1), SP1, wx.EXPAND),
+            (y, wx.GBPosition(3, 2), SP1, wx.EXPAND),
+            (px_lbl, wx.GBPosition(4, 0), SP1, ALIGN_CENTER_RIGHT),
+            (px_x, wx.GBPosition(4, 1), SP1, ALIGN_CENTER_RIGHT | wx.EXPAND),
+            (px_y, wx.GBPosition(4, 2), SP1, ALIGN_CENTER_RIGHT | wx.EXPAND))
 
         self.target = target
         self.size = size
@@ -1012,10 +966,10 @@ class FullscreenFrame(wx.Frame):
     def Show(self, show=True):
         super().Show(show)
         if show:
-            super().Maximize()
+            self.Maximize()
 
 
-class BasicGui(wx.Frame):
+class GuiFrame(wx.Frame):
     ''' Simple three-section GUI with image, left sidebar, and bottom bar. '''
 
     def __init__(self, *args, **kwargs):
@@ -1032,8 +986,8 @@ class BasicGui(wx.Frame):
             }
 
         # GUI elements
-        self.image = np.zeros(sz_img, dtype=np.uint8)
-        self.image_window = GuiImage(self)
+        self.image = np.zeros(SZ_IMAGE, dtype=np.uint8)
+        self.image_window = ImageWindow(self)
         self.view_panel = ViewPanel(self)
         # self.panel_requests = {'sensor': 'all', 'stage': 'all'}
         self.layout = {
@@ -1115,20 +1069,20 @@ class BasicGui(wx.Frame):
 
     def Assemble(self):
 
-        def add_module(parent, module, padding=pad):
+        def add_module(parent, module, padding=PX_PAD):
             ''' Add module (panel or sizer) to parent sizer with padding '''
             parent.Add(module)
             parent.AddSpacer(padding)
 
-        def construct_panel(orientation, modules, padding=pad):
+        def construct_panel(orientation, modules, padding=PX_PAD):
             ''' Build sizer from modules with given orientation and padding '''
             sizer = wx.BoxSizer(orientation)
             if len(modules) > 0:
                 if orientation == wx.VERTICAL:
-                    sizer.AddSpacer(pad_outer)
+                    sizer.AddSpacer(PX_PAD_OUTER)
                 for module in modules[:-1]:
                     add_module(sizer, module, padding)
-                add_module(sizer, modules[-1], pad_outer)
+                add_module(sizer, modules[-1], PX_PAD_OUTER)
             return sizer
 
         # Assemble GUI elements
@@ -1137,13 +1091,13 @@ class BasicGui(wx.Frame):
         left_szr = construct_panel(wx.VERTICAL, layout['left'])
         bot_szr = construct_panel(wx.HORIZONTAL, layout['bottom'])
         layout['right'].append(bot_szr)
-        right_szr = construct_panel(wx.VERTICAL, layout['right'], pad_outer)
+        right_szr = construct_panel(wx.VERTICAL, layout['right'], PX_PAD_OUTER)
         layout['right'].pop()   # allow bot_szr to be deleted on Assemble()
 
         # Assemble GUI
-        gui_sizer.AddSpacer(pad_outer)
-        add_module(gui_sizer, left_szr, pad_outer)
-        add_module(gui_sizer, right_szr, pad_outer)
+        gui_sizer.AddSpacer(PX_PAD_OUTER)
+        add_module(gui_sizer, left_szr, PX_PAD_OUTER)
+        add_module(gui_sizer, right_szr, PX_PAD_OUTER)
         self.SetSizerAndFit(gui_sizer, deleteOld=True)
-        self.Layout()
+        self.Layout()   # HACK: Sometimes this doesn't trigger automatically?
         self.Show()
