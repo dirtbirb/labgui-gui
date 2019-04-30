@@ -220,6 +220,7 @@ class GuiPanel(wx.Panel):
 
     def __init__(self, *args, device=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.controls = []
         self.device = device
 
     def __getattribute__(self, name):
@@ -281,11 +282,19 @@ class GuiPanel(wx.Panel):
         ''' Similar to SetSizerAndFit, but creates a GuiSizer first '''
         self.SetSizerAndFit(GuiSizer(*items))
 
-    def update(self, event=None):
-        print("Got update!")
-
     def reset(self, event=None):
-        pass
+        for control in self.controls:
+            if isinstance(control, wx.TextCtrl):
+                control.SetValue('')
+            elif isinstance(control, wx.ToggleButton):
+                control.SetValue(False)
+            elif isinstance(control, wx.ItemContainerImmutable):
+                control.SetSelection(0)
+
+    def update(self, event=None):
+        self.reset()
+        for control in self.controls:
+            wx.PostEvent(control, wx.EVT_COMMAND)
 
 
 class ViewPanel(GuiPanel):
@@ -465,7 +474,7 @@ class ViewPanel(GuiPanel):
             self.video_writer = None
         flag.set()      # Continue capture
 
-    def update_panels(self, event=None):
+    def update(self, event=None):
         for panel in self.device_panels:
             panel.update()
 
@@ -517,6 +526,7 @@ class RoiPanel(SettingsPanel):
         self.w = w
         self.y = y
         self.h = h
+        self.controls = [apply, load, x, w, y, h]
 
         def roi(event=None):
             if not self.device:
@@ -556,7 +566,7 @@ class TextSettingsPanel(SettingsPanel):
             raise TypeError("SettingsPanel.build_column() requires a list")
 
         i, j = start
-        elements = []
+        elements, controls = [], []
         for param, units, func in textctrls:
             # Create GUI elements
             label = wx.StaticText(self, label=param)
@@ -573,7 +583,9 @@ class TextSettingsPanel(SettingsPanel):
             field.Bind(wx.EVT_TEXT_ENTER, make_binding(field, func))
             # Expose ctrl as panel attribute
             self.__setattr__(param.lower().replace(' ', '_'), field)
+            controls.append(field)
             i += 1
+        self.controls = controls
         return elements
 
 
@@ -696,6 +708,8 @@ class ColorPanel(GuiPanel):
         self.gamma_val = gamma_val
         self.sat_btn = sat_btn
         self.sat_val = sat_val
+        self.controls = [colormap, range_btn, range_val, gamma_btn, gamma_val,
+            sat_btn, sat_val]
 
         self.set_gamma()
         self.GetParent().img_processes['resized'].append(self.process_img)
@@ -809,6 +823,7 @@ class FlatFieldPanel(GuiPanel):
         self.save = save
         self.apply = apply
         self.thumb = thumb
+        self.controls = [save, apply, thumb]
 
         self.GetParent().img_processes['full'].append(self.process_img)
 
@@ -892,6 +907,7 @@ class TargetPanel(GuiPanel):
         self.px_x = px_x
         self.px_y = px_y
         self.reset_btn = reset_btn
+        self.controls = [target, size, x, y, px_x, px_y, reset_btn]
 
         self.reset()
 
