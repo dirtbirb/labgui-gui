@@ -281,10 +281,10 @@ class GuiPanel(wx.Panel):
         ''' Similar to SetSizerAndFit, but creates a GuiSizer first '''
         self.SetSizerAndFit(GuiSizer(*items))
 
-    def update(self, event):
+    def update(self, event=None):
         print("Got update!")
 
-    def reset(self, event):
+    def reset(self, event=None):
         pass
 
 
