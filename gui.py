@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import threading
 import wx
+import wx.lib.newevent
 from queue import Queue
 from time import sleep
 
@@ -142,15 +143,6 @@ class TestSensor(NullDevice):
 
 # wx.Object (misc stuff) ------------------------------------------------------
 
-class ImageWindow(wx.Window):
-    ''' Basic wx Window for painting images on '''
-
-    def __init__(self, *args, size=SZ_IMAGE, **kwargs):
-        super().__init__(*args, size=size, **kwargs)
-        self.SetMinClientSize(size)
-        self.SetBackgroundColour(CLR_BG)
-
-
 class GuiSizer(wx.GridBagSizer):
     ''' wx GridBagSizer that accepts list of elements to build from '''
 
@@ -162,6 +154,15 @@ class GuiSizer(wx.GridBagSizer):
     def AddList(sizer, *items):
         for item in items:
             sizer.Add(*item)
+
+
+class ImageWindow(wx.Window):
+    ''' Basic wx Window for painting images on '''
+
+    def __init__(self, *args, size=SZ_IMAGE, **kwargs):
+        super().__init__(*args, size=size, **kwargs)
+        self.SetMinClientSize(size)
+        self.SetBackgroundColour(CLR_BG)
 
 
 # wx.Dialog -------------------------------------------------------------------
@@ -298,7 +299,7 @@ class ViewPanel(GuiPanel):
 
         # Make GUI elements
         source = wx.Choice(self, size=WD2)
-        play_btn = wx.ToggleButton(self, label='Start', size=SZ1)
+        play_btn = wx.ToggleButton(self, label='Play', size=SZ1)
         full_btn = wx.ToggleButton(self, label='Full', size=SZ1)
         save_img_btn = wx.Button(self, label='Save', size=SZ1)
         save_vid_btn = wx.ToggleButton(self, label='Record', size=SZ1)
@@ -458,10 +459,22 @@ class ViewPanel(GuiPanel):
             self.video_writer = None
         flag.set()      # Continue capture
 
+    def update_panels(self, event=None):
+        for panel in self.device_panels:
+            panel.update()
+
 
 # Sensor templates
 
-class RoiPanel(GuiPanel):
+class SettingsPanel(GuiPanel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def update(self, event=None):
+        print("Got update!")
+
+
+class RoiPanel(SettingsPanel):
     ''' ROI (Region Of Interest) control '''
 
     def __init__(self, *args, name='ROI', **kwargs):
@@ -503,14 +516,13 @@ class RoiPanel(GuiPanel):
             if not self.device:
                 return
 
-            # TODO: Validate
+            self.x = validate(self.x, mx=1)
+            self.y = validate(self.y, mx=1)
+            self.w = validate(self.w, mn=self.x, mx=1)
+            self.h = validate(self.h, mn=self.y, mx=1)
 
-            new = self.device.roi(
-                {'x': self.x, 'y': self.y, 'w': self.w, 'h': self.h})
-            self.x = new['x']
-            self.y = new['y']
-            self.w = new['w']
-            self.h = new['h']
+            self.x, self.y, self.w, self.h = self.device.roi(
+                (self.x, self.y, self.w, self.h))
 
         x.Bind(wx.EVT_TEXT_ENTER, roi)
         y.Bind(wx.EVT_TEXT_ENTER, roi)
@@ -518,15 +530,13 @@ class RoiPanel(GuiPanel):
         h.Bind(wx.EVT_TEXT_ENTER, roi)
         apply.Bind(wx.EVT_BUTTON, roi)
         # load.Bind(wx.EVT_BUTTON, self.set_roi)
+        load.Disable()
 
 
-class SettingsPanel(GuiPanel):
+class TextSettingsPanel(SettingsPanel):
     ''' Sensor settings panel
         Provides build_settings as a helper method to create control panels
         from a list of settings. '''
-
-    def __init__(self, *args, name='Sensor', **kwargs):
-        super().__init__(*args, name=name, **kwargs)
 
     def build_textctrls(self, textctrls, start=(0, 0)):
         ''' Build column of functional wx.TextCtrls from a list of parameters.
