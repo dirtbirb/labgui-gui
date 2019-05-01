@@ -3,7 +3,7 @@ import numpy as np
 import threading
 import wx
 import wx.lib.newevent
-from queue import Queue
+from queue import Queue, Empty
 from time import sleep
 
 
@@ -12,14 +12,16 @@ from time import sleep
 PX_PAD = 25
 PX_PAD_INNER = 3
 PX_PAD_OUTER = 10
-SZ_IMAGE = (1280, 800)
-SZ_THUMB = (128, 86)
-SZ_BTN = (2*PX_PAD, 2*PX_PAD)
-SZ1 = (2*PX_PAD, PX_PAD)
-HT1 = (-1, PX_PAD)
-WD2 = (3*PX_PAD, -1)
-SZ2 = (3*PX_PAD, PX_PAD)
-SZ3 = (4*PX_PAD, PX_PAD)
+SZ_IMAGE = wx.Size(1280, 800)
+SZ_THUMB = wx.Size(128, 86)
+SZ_BTN = wx.Size(2*PX_PAD, 2*PX_PAD)
+HT1 = wx.Size(-1, PX_PAD)
+WD1 = wx.Size(2*PX_PAD, -1)
+WD2 = wx.Size(3*PX_PAD, -1)
+WD3 = wx.Size(4*PX_PAD, -1)
+SZ1 = wx.Size(2*PX_PAD, PX_PAD)
+SZ2 = wx.Size(3*PX_PAD, PX_PAD)
+SZ3 = wx.Size(4*PX_PAD, PX_PAD)
 SP1 = wx.GBSpan(1, 1)
 SP2 = wx.GBSpan(1, 2)
 SP3 = wx.GBSpan(1, 3)
@@ -134,7 +136,7 @@ class TestSensor(NullDevice):
         def img_loop():
             while self.running:
                 self.img_queue.put(test_image())
-                sleep(0.03)
+                # sleep(0.03)
 
         self.running = True
         self.img_thread = threading.Thread(target=img_loop)
@@ -179,11 +181,28 @@ class GuiSizer(wx.GridBagSizer):
 class ImageWindow(wx.Window):
     ''' Basic wx Window for painting images on '''
 
-    def __init__(self, *args, size=SZ_IMAGE, **kwargs):
-        super().__init__(*args, size=size, **kwargs)
+    def __init__(self, parent, queue=None, size=SZ_IMAGE, **kwargs):
+        super().__init__(parent, size=size, **kwargs)
         self.SetMinClientSize(size)
         self.SetBackgroundColour(CLR_BG)
+        self.dc_processes = []
 
+        if queue:
+            def OnPaint(event):
+                ''' Get image and draw to wx window '''
+                try:
+                    img = queue.get(timeout=0.01)
+                except Empty:
+                    return
+                # Skip frame if resized incorrectly for current window
+                size = self.GetSize()
+                if size == img.shape[:2][::-1]:
+                    # Draw display window and update
+                    dc = wx.PaintDC(self)
+                    dc.DrawBitmap(wx.Bitmap.FromBuffer(*size, img), 0, 0)
+                    for process in self.dc_processes:
+                        process(dc)
+            self.Bind(wx.EVT_PAINT, OnPaint)
 
 # wx.Dialog -------------------------------------------------------------------
 
@@ -334,14 +353,14 @@ class ViewPanel(GuiPanel):
         Unlike other panels, this panel is tightly integrated with BasicGui.
         Many functions use GetParent() to manipulate BasicGui directly. '''
 
-    def __init__(self, *args, name='View', **kwargs):
-        super().__init__(*args, name=name, **kwargs)
+    def __init__(self, parent, queue, name='View', **kwargs):
+        super().__init__(parent, name=name, **kwargs)
         self.parent = self.GetParent()
 
         # Background attributes
         self.device_panels = []
         self.frames = 0
-        self.full_window = FullscreenFrame(self)
+        self.full_frame = FullscreenFrame(self, queue)
         self.video_writer = None
 
         # Make GUI elements
@@ -351,7 +370,7 @@ class ViewPanel(GuiPanel):
         save_img_btn = wx.Button(self, label='Save', size=SZ1)
         save_vid_btn = wx.ToggleButton(self, label='Record', size=SZ1)
         fps_lbl = wx.StaticText(self, label='FPS ')
-        fps = wx.StaticText(self, label='-')
+        fps = wx.StaticText(self, label='-', size=WD1)
 
         # Assemble GUI elements
         self.MakeSizerAndFit(
@@ -456,7 +475,7 @@ class ViewPanel(GuiPanel):
 
     # Manage display -------------------------------
     def fullscreen(self, event=None):
-        self.full_window.Show(self.full_btn)
+        self.full_frame.Show(self.full_btn)
 
     def play(self, event=None):
         flag = self.parent.img_start
@@ -1062,8 +1081,8 @@ class TargetPanel(GuiPanel):
 class FullscreenFrame(wx.Frame):
     ''' Frame that simulates fullscreen on Show() '''
 
-    def __init__(self, *args, style=0, **kwargs):
-        super().__init__(*args, style=style, **kwargs)
+    def __init__(self, parent, queue, style=0, **kwargs):
+        super().__init__(parent, style=style, **kwargs)
 
         def on_key(event):
             ''' Exit fullscreen on ESC and inform parent frame '''
@@ -1071,8 +1090,8 @@ class FullscreenFrame(wx.Frame):
                 self.GetParent().full_btn = False
                 self.Hide()
 
-        window = wx.Window(self)    # Required to process EVT_KEY_DOWN
-        window.Bind(wx.EVT_KEY_DOWN, on_key)
+        self.window = ImageWindow(self, queue)
+        self.window.Bind(wx.EVT_KEY_DOWN, on_key)
 
     def Show(self, show=True):
         super().Show(show)
@@ -1095,11 +1114,12 @@ class GuiFrame(wx.Frame):
             'resized': [],
             'dc': []
             }
+        self.display_queue = Queue(1)
 
         # GUI elements
         self.image = np.zeros(SZ_IMAGE, dtype=np.uint8)
-        self.image_window = ImageWindow(self)
-        self.view_panel = ViewPanel(self)
+        self.image_window = ImageWindow(self, self.display_queue)
+        self.view_panel = ViewPanel(self, self.display_queue)
         # self.panel_requests = {'sensor': 'all', 'stage': 'all'}
         self.layout = {
             'left': [],
@@ -1116,32 +1136,12 @@ class GuiFrame(wx.Frame):
             GRAY2RGB = cv2.COLOR_GRAY2RGB
             cvtColor = cv2.cvtColor
             resize = cv2.resize
-            Bitmap = wx.Bitmap.FromBuffer
-            CallAfter = wx.CallAfter
-            ClientDC = wx.ClientDC
             gui_window = self.image_window
             img_processes = self.img_processes
             img_get = self.img_queue.get
             wait = self.img_start.wait
             view_panel = self.view_panel
-            full_window = view_panel.full_window
-
-            display_queue = Queue(1)
-            display_get = display_queue.get
-            display_put = display_queue.put
-
-            def display(window):
-                ''' Get image and draw to wx window '''
-                sz, img = window.GetSize(), display_get()
-                # Skip frame if resized incorrectly for current window
-                if sz == img.shape[:2][::-1]:
-                    # Draw display window and update
-                    dc = ClientDC(window)
-                    dc.DrawBitmap(Bitmap(*sz, img), 0, 0)
-                    for process in img_processes['dc']:
-                        process(dc)
-                    window.Update()
-                    view_panel.frames += 1
+            full_window = view_panel.full_frame.window
 
             while True:
                 wait()                      # Wait for GUI "start"
@@ -1171,8 +1171,9 @@ class GuiFrame(wx.Frame):
                     cvt_method = BGR2RGB
                 else:                       # from grayscale
                     cvt_method = GRAY2RGB
-                display_put(cvtColor(display_img, cvt_method))
-                CallAfter(display, window)  # thread-safe
+                window.Refresh()
+                self.display_queue.put(cvtColor(display_img, cvt_method))
+                view_panel.frames += 1
 
         self.img_thread = threading.Thread(target=display_loop)
         self.img_thread.daemon = True
