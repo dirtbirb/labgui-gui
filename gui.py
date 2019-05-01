@@ -99,7 +99,7 @@ def limit(v, mn=0, mx=255):
     return max(min(v, mx), mn)
 
 
-# Fake devices ----------------------------------------------------------------
+# Devices ---------------------------------------------------------------------
 
 def test_image(shape=SZ_IMAGE[::-1]):
     ''' Generate random uint8 image of given shape '''
@@ -145,6 +145,18 @@ class TestSensor(NullDevice):
         self.running = False
         if self.img_thread:
             self.img_thread = None
+
+
+class GuiClient(object):
+    def __init__(self, wrappee, *args, **kwargs):
+        wrappee.__init__(*args, **kwargs)
+        self.panels = {}
+
+    def make_panels(self, parent):
+        built_panels = []
+        for name, panel in self.panels.items():
+            built_panels.append(panel(parent, device=self))
+        return built_panels
 
 
 # wx.Object (misc stuff) ------------------------------------------------------
@@ -623,6 +635,22 @@ class TextSettingsPanel(GuiPanel):
             i += 1
         self.controls = controls
         return elements
+
+
+class CapturePanel(TextSettingsPanel):
+    def __init__(self, *args, name='Capture', **kwargs):
+        super().__init__(*args, name=name, **kwargs)
+
+        textctrls = [
+            ('Exposure', 'us', self.device.exposure),
+            ('Gain', '', self.device.gain),
+            ('Framerate', 'fps', self.device.fps),
+            ]
+
+        self.MakeSizerAndFit(
+            (self.MakeLabel(), wx.GBPosition(0, 0), SP3),
+            *self.build_textctrls(textctrls, (1, 0)),
+            )
 
 
 class MetricsPanel(GuiPanel):
