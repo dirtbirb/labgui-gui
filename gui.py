@@ -109,6 +109,7 @@ def test_image(shape=SZ_IMAGE[::-1]):
 class NullDevice(object):
     def __init__(self, queue=None):
         super().__init__()
+        self.running = False
 
     def make_panels(self, parent):
         return []
@@ -376,8 +377,6 @@ class ViewPanel(GuiPanel):
 
             wait = self.parent.img_start.wait
             while True:
-                if not self.device or self.device.running:
-                    wx.CallAfter(update, '-')
                 wait()
                 f0 = self.frames
                 sleep(1)
