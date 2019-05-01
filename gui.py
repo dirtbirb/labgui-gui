@@ -147,9 +147,11 @@ class TestSensor(NullDevice):
             self.img_thread = None
 
 
-class GuiClient(object):
-    def __init__(self, wrappee, queue, *args, **kwargs):
-        wrappee.__init__(queue, *args, **kwargs)
+class GuiWrapper(object):
+    ''' Mixin class to add GUI panel functionality to a device '''
+
+    def __init__(self):
+        super().__init__()
         self.panels = {}
 
     def make_panels(self, parent):
