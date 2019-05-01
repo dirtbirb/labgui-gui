@@ -148,8 +148,8 @@ class TestSensor(NullDevice):
 
 
 class GuiClient(object):
-    def __init__(self, wrappee, *args, **kwargs):
-        wrappee.__init__(*args, **kwargs)
+    def __init__(self, wrappee, queue, *args, **kwargs):
+        wrappee.__init__(queue, *args, **kwargs)
         self.panels = {}
 
     def make_panels(self, parent):
