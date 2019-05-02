@@ -9,32 +9,34 @@ from time import sleep
 
 # Constants -------------------------------------------------------------------
 
+# Basic
 PX_PAD = 25
 PX_PAD_INNER = 3
 PX_PAD_OUTER = 10
-SZ_IMAGE = wx.Size(1280, 800)
-SZ_THUMB = wx.Size(128, 86)
-SZ_BTN = wx.Size(2*PX_PAD, 2*PX_PAD)
-HT1 = wx.Size(-1, PX_PAD)
-WD1 = wx.Size(2*PX_PAD, -1)
-WD2 = wx.Size(3*PX_PAD, -1)
-WD3 = wx.Size(4*PX_PAD, -1)
-SZ1 = wx.Size(2*PX_PAD, PX_PAD)
-SZ2 = wx.Size(3*PX_PAD, PX_PAD)
-SZ3 = wx.Size(4*PX_PAD, PX_PAD)
-SP1 = wx.GBSpan(1, 1)
-SP2 = wx.GBSpan(1, 2)
-SP3 = wx.GBSpan(1, 3)
+
+# wx.Object (misc)
 ALIGN_CENTER_RIGHT = wx.ALIGN_RIGHT | wx.ALIGN_CENTER_VERTICAL
 CLR_BG = wx.Colour(0, 0, 0).MakeDisabled()
 
+# wx.Size
+SZ_IMAGE = wx.Size(1280, 800)
+SZ_THUMB = wx.Size(128, 80)
+SZ_BTN = wx.Size(2*PX_PAD, 2*PX_PAD)
+SZ1 = wx.Size(2*PX_PAD, PX_PAD)
+SZ2 = wx.Size(3*PX_PAD, PX_PAD)
+SZ3 = wx.Size(4*PX_PAD, PX_PAD)
+HT1 = wx.Size(-1, PX_PAD)               # -1 = default
+WD1 = wx.Size(2*PX_PAD, -1)
+WD2 = wx.Size(3*PX_PAD, -1)
+WD3 = wx.Size(4*PX_PAD, -1)
+
+# wx.GBSpan (for wx.GridBagSizer)
+SP1 = wx.GBSpan(1, 1)
+SP2 = wx.GBSpan(1, 2)
+SP3 = wx.GBSpan(1, 3)
+
 
 # Helper functions ------------------------------------------------------------
-
-# TODO: make actual debug function
-def debug(msg):
-    print(msg)
-
 
 def is_color(img):
     ''' Return True if image contains a color channel, False otherwise '''
@@ -96,11 +98,6 @@ def top_px_avg(img, n=3):
     return ret
 
 
-def limit(v, mn=0, mx=255):
-    ''' Limit a number to given range '''
-    return max(min(v, mx), mn)
-
-
 # Devices ---------------------------------------------------------------------
 
 def test_image(shape=SZ_IMAGE[::-1]):
@@ -108,35 +105,54 @@ def test_image(shape=SZ_IMAGE[::-1]):
     return np.random.randint(0, 256, shape, np.uint8)
 
 
-class NullDevice(object):
+class GuiDevice(object):
+    ''' Mixin class to add GUI panel functionality to a device.
+        Inherited by GUI submodules. '''
+
+    def __init__(self):
+        super().__init__()
+        self.panels = {}
+
+    def make_panels(self, parent):
+        ''' Build GUI panels as children of given wx object '''
+        built_panels = []
+        for name, panel in self.panels.items():
+            built_panels.append(panel(parent, device=self))
+        return built_panels
+
+
+class NullDevice(GuiDevice):
+    ''' Placeholder device, does nothing '''
+
     def __init__(self, queue=None):
         super().__init__()
         self.running = False
 
-    def make_panels(self, parent):
-        return []
-
-    def start(self):
+    @staticmethod
+    def start():
         pass
 
-    def close(self):
+    @staticmethod
+    def close():
         pass
 
 
 class TestSensor(NullDevice):
+    ''' Test device, fills a queue with random image data '''
+
+    TIMEOUT = 1
+
     def __init__(self, queue):
-        super().__init__()
+        super().__init__(queue)
         self.img_queue = queue
         self.img_thread = None
-        self.running = False
         self.start()
 
     def start(self):
 
         def img_loop():
             while self.running:
-                self.img_queue.put(test_image())
-                # sleep(0.03)
+                self.img_queue.put(test_image(), timeout=self.TIMEOUT)
 
         self.running = True
         self.img_thread = threading.Thread(target=img_loop)
@@ -146,66 +162,13 @@ class TestSensor(NullDevice):
     def close(self):
         self.running = False
         if self.img_thread:
+            self.img_thread.join(self.TIMEOUT)
             self.img_thread = None
 
 
-class GuiWrapper(object):
-    ''' Mixin class to add GUI panel functionality to a device '''
-
-    def __init__(self):
-        super().__init__()
-        self.panels = {}
-
-    def make_panels(self, parent):
-        built_panels = []
-        for name, panel in self.panels.items():
-            built_panels.append(panel(parent, device=self))
-        return built_panels
-
-
-# wx.Object (misc stuff) ------------------------------------------------------
-
-class GuiSizer(wx.GridBagSizer):
-    ''' wx GridBagSizer that accepts list of elements to build from '''
-
-    def __init__(self, *items, hpad=None, vpad=None):
-        super().__init__(hpad or PX_PAD_INNER, vpad or PX_PAD_INNER)
-        for item in items:
-            self.Add(*item)
-
-    def AddList(sizer, *items):
-        for item in items:
-            sizer.Add(*item)
-
-
-class ImageWindow(wx.Window):
-    ''' Basic wx Window for painting images on '''
-
-    def __init__(self, parent, queue=None, size=SZ_IMAGE, **kwargs):
-        super().__init__(parent, size=size, **kwargs)
-        self.SetMinClientSize(size)
-        self.SetBackgroundColour(CLR_BG)
-        self.dc_processes = []
-
-        if queue:
-            def OnPaint(event):
-                ''' Get image and draw to wx window '''
-                try:
-                    img = queue.get(timeout=0.01)
-                except Empty:
-                    return
-                # Skip frame if resized incorrectly for current window
-                size = self.GetSize()
-                if size == img.shape[:2][::-1]:
-                    # Draw display window and update
-                    dc = wx.PaintDC(self)
-                    dc.DrawBitmap(wx.Bitmap.FromBuffer(*size, img), 0, 0)
-                    for process in self.dc_processes:
-                        process(dc)
-            self.Bind(wx.EVT_PAINT, OnPaint)
-
 # wx.Dialog -------------------------------------------------------------------
 
+# # TODO
 # def showModalDialog(title, message, style):
 #     dialog = wx.MessageDialog(self, message, title, style)
 #     result = dialog:ShowModal()
@@ -249,6 +212,21 @@ def FileDialog(msg, ext=None, save=False):
     else:                               # If clicked "Cancel"
         fn = False
     return fn
+
+
+# wx.Sizer --------------------------------------------------------------------
+
+class GuiSizer(wx.GridBagSizer):
+    ''' wx.GridBagSizer that accepts list of elements to build itself '''
+
+    def __init__(self, *items, hpad=None, vpad=None):
+        super().__init__(hpad or PX_PAD_INNER, vpad or PX_PAD_INNER)
+        for item in items:
+            self.Add(*item)
+
+    def AddList(sizer, *items):
+        for item in items:
+            sizer.Add(*item)
 
 
 # wx.Panel --------------------------------------------------------------------
@@ -360,7 +338,7 @@ class ViewPanel(GuiPanel):
         # Background attributes
         self.device_panels = []
         self.frames = 0
-        self.full_frame = FullscreenFrame(self, queue)
+        self.full_frame = FullscreenFrame(parent, queue)
         self.video_writer = None
 
         # Make GUI elements
@@ -475,7 +453,14 @@ class ViewPanel(GuiPanel):
 
     # Manage display -------------------------------
     def fullscreen(self, event=None):
-        self.full_frame.Show(self.full_btn)
+        ''' Update dc_processes and show/hide fullscreen '''
+        show = self.full_btn
+        dc_processes = self.parent.img_processes['dc']
+        if show:
+            self.full_frame.window.dc_processes = dc_processes
+        else:
+            self.parent.image_window.dc_processes = dc_processes
+        self.full_frame.Show(show)
 
     def play(self, event=None):
         flag = self.parent.img_start
@@ -540,6 +525,66 @@ class ViewPanel(GuiPanel):
 
 
 # Sensor templates
+
+class MetricsPanel(GuiPanel):
+    ''' Metrics readout panel
+        Update values (not display!) by editing dict 'values'
+        Update display with most recent values with update()
+        Update list of values to be displayed with build()
+        Start regular updates by passing an Event flag to start()
+        Stop regular updates with stop() '''
+
+    def __init__(self, *args, name='Metrics', **kwargs):
+        if 'values' in kwargs:
+            self.values = kwargs.pop('values')
+        else:
+            self.values = {}
+        super().__init__(*args, name=name, **kwargs)
+        self.build()
+        self.updating = False
+
+    def build(self):
+        self.display = {}
+        new_items = [(self.MakeLabel(), wx.GBPosition(0, 0), SP2)]
+        for name in self.values:
+            # Replace 'None' with '-' just to keep it clean
+            v = self.values[name]
+            if v is None:
+                v = '-'
+            else:
+                v = str(v)
+            # Build display
+            i = len(new_items)
+            label = wx.StaticText(self, label=name + ': ')
+            value = wx.StaticText(self, label=v)
+            new_items.extend([
+                (label, wx.GBPosition(i, 0), SP1, ALIGN_CENTER_RIGHT),
+                (value, wx.GBPosition(i, 1))])
+            self.display[name] = value
+        self.MakeSizerAndFit(*new_items)
+
+    def update(self):
+        for name in self.values:
+            if name in self.display:
+                self.display[name].SetValue(str(self.values[name]))
+
+    def start(self, update_flag):
+        def __update_loop(self):
+            while True:
+                update_flag.wait()
+                self.update()
+                update_flag.clear()
+
+        self.updating = threading.Thread(
+            target=self.__update_loop, args=(update_flag, ))
+        self.updating.daemon = True
+        self.updating.start()
+
+    def stop(self):
+        if self.updating:
+            self.updating.terminate()
+        self.updating = False
+
 
 class RoiPanel(GuiPanel):
     ''' ROI (Region Of Interest) control '''
@@ -610,10 +655,10 @@ class RoiPanel(GuiPanel):
 
     def validate(self, event=None):
         try:
-            self.x = limit(self.x, mx=1)
-            self.y = limit(self.y, mx=1)
-            self.w = limit(self.w, mn=self.x, mx=1)
-            self.h = limit(self.h, mn=self.y, mx=1)
+            self.x = np.clip(self.x, 0, 1)
+            self.y = np.clip(self.y, 0, 1)
+            self.w = np.clip(self.w, self.x, 1)
+            self.h = np.clip(self.h, self.y, 1)
         except (ValueError, TypeError):
             self.reset()
 
@@ -659,6 +704,8 @@ class TextSettingsPanel(GuiPanel):
 
 
 class CapturePanel(TextSettingsPanel):
+    ''' Basic capture settings panel, example use of TextSettingsPanel '''
+
     def __init__(self, *args, name='Capture', **kwargs):
         super().__init__(*args, name=name, **kwargs)
 
@@ -672,66 +719,6 @@ class CapturePanel(TextSettingsPanel):
             (self.MakeLabel(), wx.GBPosition(0, 0), SP3),
             *self.build_textctrls(textctrls, (1, 0)),
             )
-
-
-class MetricsPanel(GuiPanel):
-    ''' Metrics readout panel
-        Update values (not display!) by editing dict 'values'
-        Update display with most recent values with update()
-        Update list of values to be displayed with build()
-        Start regular updates by passing an Event flag to start()
-        Stop regular updates with stop() '''
-
-    def __init__(self, *args, name='Metrics', **kwargs):
-        if 'values' in kwargs:
-            self.values = kwargs.pop('values')
-        else:
-            self.values = {}
-        super().__init__(*args, name=name, **kwargs)
-        self.build()
-        self.updating = False
-
-    def build(self):
-        self.display = {}
-        new_items = [(self.MakeLabel(), wx.GBPosition(0, 0), SP2)]
-        for name in self.values:
-            # Replace 'None' with '-' just to keep it clean
-            v = self.values[name]
-            if v is None:
-                v = '-'
-            else:
-                v = str(v)
-            # Build display
-            i = len(new_items)
-            label = wx.StaticText(self, label=name + ': ')
-            value = wx.StaticText(self, label=v)
-            new_items.extend([
-                (label, wx.GBPosition(i, 0), SP1, ALIGN_CENTER_RIGHT),
-                (value, wx.GBPosition(i, 1))])
-            self.display[name] = value
-        self.MakeSizerAndFit(*new_items)
-
-    def update(self):
-        for name in self.values:
-            if name in self.display:
-                self.display[name].SetValue(str(self.values[name]))
-
-    def start(self, update_flag):
-        def __update_loop(self):
-            while True:
-                update_flag.wait()
-                self.update()
-                update_flag.clear()
-
-        self.updating = threading.Thread(
-            target=self.__update_loop, args=(update_flag, ))
-        self.updating.daemon = True
-        self.updating.start()
-
-    def stop(self):
-        if self.updating:
-            self.updating.terminate()
-        self.updating = False
 
 
 # Image processing
@@ -804,7 +791,7 @@ class ColorPanel(GuiPanel):
         ''' Validate dynamic range value '''
         if self.range_btn:
             try:
-                v = limit(int(self.range_val))
+                v = np.clip(int(self.range_val), 0, 255)
             except ValueError:
                 v = 255
             self.range_val = v
@@ -814,7 +801,7 @@ class ColorPanel(GuiPanel):
         if self.gamma_btn:
             try:
                 # Validate
-                gamma = limit(self.gamma_val, 0.0, 10.0)
+                gamma = np.clip(self.gamma_val, 0.0, 10.0)
                 # Create look-up table (LUT)
                 self.gamma_lut = np.array(
                     np.arange(0, 1, 1/256) ** (1/gamma) * 255 + 0.5, np.uint8)
@@ -827,7 +814,7 @@ class ColorPanel(GuiPanel):
         ''' Validate dynamic range value '''
         if self.sat_btn:
             try:
-                v = limit(int(self.sat_val))
+                v = np.clip(int(self.sat_val), 0, 255)
             except ValueError:
                 v = 255
             self.sat_val = v
@@ -1074,6 +1061,35 @@ class TargetPanel(GuiPanel):
 
     def process_img(self, img):
         return self.target_img(img)
+
+
+# wx.Window ------------------------------------------------------------------
+
+class ImageWindow(wx.Window):
+    ''' Basic wx Window for painting images on '''
+
+    def __init__(self, parent, queue=None, size=SZ_IMAGE, **kwargs):
+        super().__init__(parent, size=size, **kwargs)
+        self.SetMinClientSize(size)
+        self.SetBackgroundColour(CLR_BG)
+        self.dc_processes = []
+
+        if queue:
+            def OnPaint(event):
+                ''' Get image and draw to wx window '''
+                try:
+                    img = queue.get(timeout=0.01)
+                except Empty:
+                    return
+                # Skip frame if resized incorrectly for current window
+                size = self.GetSize()
+                if size == img.shape[:2][::-1]:
+                    # Draw display window and update
+                    dc = wx.PaintDC(self)
+                    dc.DrawBitmap(wx.Bitmap.FromBuffer(*size, img), 0, 0)
+                    for process in self.dc_processes:
+                        process(dc)
+            self.Bind(wx.EVT_PAINT, OnPaint)
 
 
 # wx.Frame -------------------------------------------------------------------
