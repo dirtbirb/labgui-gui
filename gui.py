@@ -1,9 +1,9 @@
 import cv2
 import numpy as np
+import queue
 import threading
 import wx
 import wx.lib.newevent
-from queue import Queue, Empty
 from time import sleep
 
 
@@ -124,7 +124,7 @@ class GuiDevice(object):
 class NullDevice(GuiDevice):
     ''' Placeholder device, does nothing '''
 
-    def __init__(self, queue=None):
+    def __init__(self, img_queue=None):
         super().__init__()
         self.running = False
 
@@ -138,13 +138,13 @@ class NullDevice(GuiDevice):
 
 
 class TestSensor(NullDevice):
-    ''' Test device, fills a queue with random image data '''
+    ''' Test device, fills img_queue with random image data '''
 
     TIMEOUT = 1
 
-    def __init__(self, queue):
-        super().__init__(queue)
-        self.img_queue = queue
+    def __init__(self, img_queue):
+        super().__init__(img_queue)
+        self.img_queue = img_queue
         self.img_thread = None
         self.start()
 
@@ -152,7 +152,10 @@ class TestSensor(NullDevice):
 
         def img_loop():
             while self.running:
-                self.img_queue.put(test_image(), timeout=self.TIMEOUT)
+                try:
+                    self.img_queue.put(test_image(), timeout=self.TIMEOUT)
+                except queue.Full:
+                    pass
 
         self.running = True
         self.img_thread = threading.Thread(target=img_loop)
@@ -161,9 +164,7 @@ class TestSensor(NullDevice):
 
     def close(self):
         self.running = False
-        if self.img_thread:
-            self.img_thread.join(self.TIMEOUT)
-            self.img_thread = None
+        self.img_thread = None
 
 
 # wx.Dialog -------------------------------------------------------------------
@@ -331,14 +332,15 @@ class ViewPanel(GuiPanel):
         Unlike other panels, this panel is tightly integrated with BasicGui.
         Many functions use GetParent() to manipulate BasicGui directly. '''
 
-    def __init__(self, parent, queue, name='View', **kwargs):
+    def __init__(self, parent, img_queue, name='View', **kwargs):
         super().__init__(parent, name=name, **kwargs)
         self.parent = self.GetParent()
 
         # Background attributes
         self.device_panels = []
         self.frames = 0
-        self.full_frame = FullscreenFrame(parent, queue)
+        self.full_frame = FullscreenFrame(
+            self, img_queue, parent.img_processes['dc'])
         self.video_writer = None
 
         # Make GUI elements
@@ -386,7 +388,7 @@ class ViewPanel(GuiPanel):
             def update(f):
                 fps.SetLabel(f)
 
-            wait = self.parent.img_start.wait
+            wait = self.parent.img_show.wait
             while True:
                 wait()
                 f0 = self.frames
@@ -453,17 +455,11 @@ class ViewPanel(GuiPanel):
 
     # Manage display -------------------------------
     def fullscreen(self, event=None):
-        ''' Update dc_processes and show/hide fullscreen '''
-        show = self.full_btn
-        dc_processes = self.parent.img_processes['dc']
-        if show:
-            self.full_frame.window.dc_processes = dc_processes
-        else:
-            self.parent.image_window.dc_processes = dc_processes
-        self.full_frame.Show(show)
+        ''' Show/hide fullscreen frame '''
+        self.full_frame.Show(self.full_btn)
 
     def play(self, event=None):
-        flag = self.parent.img_start
+        flag = self.parent.img_show
         if self.play_btn:
             flag.set()
         else:
@@ -487,7 +483,7 @@ class ViewPanel(GuiPanel):
 
     def save_vid(self, event=None):
         ''' Start/stop recording, with save dialog '''
-        flag = self.GetParent().img_start
+        flag = self.GetParent().img_show
         flag.clear()    # Pause capture
         if self.play_btn and self.save_vid_btn:
             fn = FileDialog('Save video', '.avi', save=True)
@@ -906,14 +902,13 @@ class FlatFieldPanel(GuiPanel):
         self.ff = self.GetParent().image.copy()
 
         # Update thumbnail on gui
-        thumb = cv2.resize(self.ff, SZ_THUMB)
+        thumb = cv2.resize(self.ff, tuple(SZ_THUMB))
         if is_color(thumb):
             thumb = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
         else:
             thumb = cv2.cvtColor(thumb, cv2.COLOR_GRAY2RGB)
-        dc = wx.ClientDC(self.thumb)
-        dc.DrawBitmap(wx.Bitmap.FromBuffer(*SZ_THUMB, thumb), 0, 0)
-        self.thumb.Update()
+        self.thumb.image = thumb
+        self.thumb.Refresh()
 
     def validate(self, event=None):
         if self.ff is None:
@@ -1066,30 +1061,46 @@ class TargetPanel(GuiPanel):
 # wx.Window ------------------------------------------------------------------
 
 class ImageWindow(wx.Window):
-    ''' Basic wx Window for painting images on '''
+    ''' Basic wx.Window for painting images '''
 
-    def __init__(self, parent, queue=None, size=SZ_IMAGE, **kwargs):
+    def __init__(self, parent, image=None, size=SZ_IMAGE, **kwargs):
         super().__init__(parent, size=size, **kwargs)
-        self.SetMinClientSize(size)
+        self.image = image
         self.SetBackgroundColour(CLR_BG)
-        self.dc_processes = []
+        self.SetMinClientSize(size)
+        self.Bind(wx.EVT_PAINT, self.OnPaint)
 
-        if queue:
-            def OnPaint(event):
-                ''' Get image and draw to wx window '''
-                try:
-                    img = queue.get(timeout=0.01)
-                except Empty:
-                    return
-                # Skip frame if resized incorrectly for current window
-                size = self.GetSize()
-                if size == img.shape[:2][::-1]:
-                    # Draw display window and update
-                    dc = wx.PaintDC(self)
-                    dc.DrawBitmap(wx.Bitmap.FromBuffer(*size, img), 0, 0)
-                    for process in self.dc_processes:
-                        process(dc)
-            self.Bind(wx.EVT_PAINT, OnPaint)
+    def OnPaint(self, event):
+        ''' Draw image to GUI '''
+        if self.image is not None:
+            dc = wx.PaintDC(self)
+            dc.DrawBitmap(
+                wx.Bitmap.FromBuffer(*self.GetSize(), self.image), 0, 0)
+
+
+class VideoWindow(ImageWindow):
+    ''' Subclass of ImageWindow for rapidly painting images '''
+
+    def __init__(self, parent, img_queue, dc_processes=[], size=SZ_IMAGE,
+                 **kwargs):
+        self.dc_processes = dc_processes
+        self.img_queue = img_queue
+        super().__init__(parent, size=size, **kwargs)
+
+    def OnPaint(self, event):
+        ''' Get image from queue and draw '''
+        try:
+            img = self.img_queue.get(timeout=0.1)
+        except queue.Empty:
+            return
+        # Skip frame if resized incorrectly for current window
+        size = self.GetSize()
+        if size == img.shape[:2][::-1]:
+            # Draw display window and update
+            dc = wx.PaintDC(self)
+            dc.DrawBitmap(wx.Bitmap.FromBuffer(*size, img), 0, 0)
+            for process in self.dc_processes:
+                process(dc)
 
 
 # wx.Frame -------------------------------------------------------------------
@@ -1097,7 +1108,7 @@ class ImageWindow(wx.Window):
 class FullscreenFrame(wx.Frame):
     ''' Frame that simulates fullscreen on Show() '''
 
-    def __init__(self, parent, queue, style=0, **kwargs):
+    def __init__(self, parent, img_queue, dc_processes=[], style=0, **kwargs):
         super().__init__(parent, style=style, **kwargs)
 
         def on_key(event):
@@ -1106,8 +1117,8 @@ class FullscreenFrame(wx.Frame):
                 self.GetParent().full_btn = False
                 self.Hide()
 
-        self.window = ImageWindow(self, queue)
-        self.window.Bind(wx.EVT_KEY_DOWN, on_key)
+        self.img_window = VideoWindow(self, img_queue, dc_processes)
+        self.img_window.Bind(wx.EVT_KEY_DOWN, on_key)
 
     def Show(self, show=True):
         super().Show(show)
@@ -1123,23 +1134,24 @@ class GuiFrame(wx.Frame):
 
         # Image control
         self.frames = 0
-        self.img_start = threading.Event()
-        self.img_queue = Queue(1)
+        self.img_show = threading.Event()
+        self.img_queue = queue.Queue(1)
         self.img_processes = {
             'full': [],
             'resized': [],
             'dc': []
             }
-        self.display_queue = Queue(1)
+        self.display_queue = queue.Queue(1)
 
         # GUI elements
         self.image = np.zeros(SZ_IMAGE, dtype=np.uint8)
-        self.image_window = ImageWindow(self, self.display_queue)
+        self.img_window = VideoWindow(
+            self, self.display_queue, self.img_processes['dc'])
         self.view_panel = ViewPanel(self, self.display_queue)
         # self.panel_requests = {'sensor': 'all', 'stage': 'all'}
         self.layout = {
             'left': [],
-            'right': [self.image_window],
+            'right': [self.img_window],
             'bottom': [self.view_panel]
             }
 
@@ -1152,18 +1164,18 @@ class GuiFrame(wx.Frame):
             GRAY2RGB = cv2.COLOR_GRAY2RGB
             cvtColor = cv2.cvtColor
             resize = cv2.resize
-            gui_window = self.image_window
+            img_window = self.img_window
             img_processes = self.img_processes
             img_get = self.img_queue.get
-            wait = self.img_start.wait
+            wait = self.img_show.wait
             view_panel = self.view_panel
-            full_window = view_panel.full_frame.window
+            full_window = view_panel.full_frame.img_window
 
             while True:
                 wait()                      # Wait for GUI "start"
                 sensor_img = img_get()      # Wait for available image
                 if sensor_img is None:      # Skip image errors
-                    print("Debug: Image queue skipped 'None'")
+                    print("Debug: 'None' found in image queue, skipped ")
                     continue
 
                 # Full-frame image processing
@@ -1175,7 +1187,7 @@ class GuiFrame(wx.Frame):
                 if view_panel.full_btn:
                     window = full_window
                 else:
-                    window = gui_window
+                    window = img_window
                 display_img = resize(sensor_img, tuple(window.GetSize()))
 
                 # Resized-frame image processing
