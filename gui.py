@@ -334,9 +334,10 @@ class ViewPanel(GuiPanel):
 
     def __init__(self, parent, img_queue, name='View', **kwargs):
         super().__init__(parent, name=name, **kwargs)
-        self.parent = self.GetParent()
 
         # Background attributes
+        self.parent = parent
+        self.device = None
         self.device_panels = []
         self.frames = 0
         self.full_frame = FullscreenFrame(
@@ -378,11 +379,6 @@ class ViewPanel(GuiPanel):
         save_vid_btn.Bind(wx.EVT_TOGGLEBUTTON, self.save_vid)
         source.Bind(wx.EVT_CHOICE, self.select_source)
 
-        # Finish init
-        self.add_source('none', NullDevice)
-        source.SetSelection(0)
-        self.GetParent().img_processes['full'].append(self.save_frame)
-
         # FPS (frames per second) counter
         def fps_loop():
             def update(f):
@@ -398,6 +394,12 @@ class ViewPanel(GuiPanel):
         fps_thread = threading.Thread(target=fps_loop)
         fps_thread.daemon = True
         fps_thread.start()
+
+        # Finish init
+        self.add_source('none', NullDevice)
+        source.SetSelection(0)
+        parent.img_processes['full'].append(self.save_frame)
+        parent.Bind(wx.EVT_CLOSE, self.OnClose)
 
     # Manage sources -------------------------------
     def add_source(self, name, obj):
@@ -518,6 +520,13 @@ class ViewPanel(GuiPanel):
     def update(self, event=None):
         for panel in self.device_panels:
             panel.update()
+
+    # Cleanup --------------------------------------
+    def OnClose(self, event):
+        ''' Make sure any open device closes cleanly '''
+        if self.device:
+            self.device.close()
+        event.Skip()    # Continue processing Close event
 
 
 # Sensor templates
