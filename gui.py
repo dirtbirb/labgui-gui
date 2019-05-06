@@ -113,11 +113,13 @@ class GuiDevice(object):
         super().__init__()
         self.panels = {}
 
+    def make_panel(self, parent, panel_name):
+        return self.panels[panel_name](parent, device=self)
+
     def make_panels(self, parent):
-        ''' Build GUI panels as children of given wx object '''
         built_panels = []
-        for name, panel in self.panels.items():
-            built_panels.append(panel(parent, device=self))
+        for panel_name in self.panels:
+            built_panels.append(self.make_panel(parent, panel_name))
         return built_panels
 
 
