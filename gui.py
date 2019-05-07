@@ -683,9 +683,8 @@ class RoiPanel(GuiPanel):
             self.reset()
 
 
-class TextSettingsPanel(GuiPanel):
-    ''' Sensor settings panel
-        Provides build_settings as a helper method to create control panels
+class TextCtrlPanel(GuiPanel):
+    ''' Provides build_settings as a helper method to create control panels
         from a list of settings. '''
 
     def build_textctrls(self, textctrls, start=(0, 0)):
@@ -696,8 +695,9 @@ class TextSettingsPanel(GuiPanel):
             Sets panel attributes, binds functions, and returns GUI layout:
                 [(StaticText label, TextCtrl value, StaticText units)...] '''
 
-        if not isinstance(textctrls, list):
-            raise TypeError("SettingsPanel.build_column() requires a list")
+        if not isinstance(textctrls, (tuple, list)):
+            raise TypeError(
+                "TextSettingsPanel.build_textctrls requires a tuple or list.")
 
         i, j = start
         layout, controls = [], []
@@ -723,8 +723,8 @@ class TextSettingsPanel(GuiPanel):
         return layout
 
 
-class CapturePanel(TextSettingsPanel):
-    ''' Basic capture settings panel, example use of TextSettingsPanel '''
+class CapturePanel(TextCtrlPanel):
+    ''' Basic capture settings panel, example use of TextCtrlPanel '''
 
     def __init__(self, *args, name='Capture', **kwargs):
         super().__init__(*args, name=name, **kwargs)
@@ -733,12 +733,13 @@ class CapturePanel(TextSettingsPanel):
         textctrls = [
             ('Exposure', 'us', self.device.exposure),
             ('Gain', '', self.device.gain),
-            ('Framerate', 'fps', self.device.fps),
+            ('Framerate', 'fps', self.device.fps)
             ]
-
-        return [
+        layout = [
             (self.MakeLabel(), wx.GBPosition(0, 0), SP3),
-            *self.build_textctrls(textctrls, (1, 0))]
+            *self.build_textctrls(textctrls, (1, 0))
+            ]
+        return layout
 
 
 # Image processing
@@ -749,7 +750,6 @@ class ColorPanel(GuiPanel):
     def __init__(self, *args, name='Color', **kwargs):
         super().__init__(*args, name=name, **kwargs)
 
-        self.set_gamma()
         self.GetParent().img_processes['resized'].append(self.process_img)
 
     def MakeLayout(self):
@@ -797,6 +797,8 @@ class ColorPanel(GuiPanel):
         self.controls = [
             colormap, range_btn, range_val, gamma_btn, gamma_val, sat_btn,
             sat_val]
+
+        self.set_gamma()
 
         layout = [
             (self.MakeLabel(), wx.GBPosition(0, 0), SP2),
