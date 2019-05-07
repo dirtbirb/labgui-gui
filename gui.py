@@ -745,7 +745,8 @@ class ColorPanel(GuiPanel):
 
     def __init__(self, *args, name='Color', **kwargs):
         super().__init__(*args, name=name, **kwargs)
-
+        self.gamma_lut = None
+        self.sat_map = None
         self.GetParent().img_processes['resized'].append(self.process_img)
 
     def MakeLayout(self):
@@ -813,6 +814,9 @@ class ColorPanel(GuiPanel):
         if self.range_btn:
             try:
                 v = np.clip(int(self.range_val), 0, 255)
+                # self.range_lut = np.array(
+                #     np.arange(0, v) * (255 / v)
+                # )
             except ValueError:
                 v = 255
             self.range_val = v
@@ -853,8 +857,11 @@ class ColorPanel(GuiPanel):
         ''' Stretch dynamic range to be from 0 to self.range_val '''
         if self.range_btn:
             img -= img.min()
-            f = self.range_val / top_px(img, 20)
-            img = np.uint8(np.where(img < 255 / f, img * f, 255))
+            if self.sat_btn and isinstance(self.sat_map, np.ndarray):
+                f = self.range_val / img[~self.sat_map].max()
+            else:
+                f = self.range_val / img.max()
+            img = np.uint8(img * f)
         return img
 
     def gamma_img(self, img):
@@ -866,18 +873,18 @@ class ColorPanel(GuiPanel):
     def find_sat_img(self, img):
         ''' Find and save locations of pixels above given threshold '''
         if self.sat_btn:
+            self.sat_map = img >= self.sat_val
             if is_color(img):
-                self.saturated = np.logical_or.reduce(img >= self.sat_val, 2)
-            else:
-                self.saturated = img >= self.sat_val
+                self.sat_map = np.logical_or.reduce(self.sat_map, 2)
         return img
 
     def apply_sat_img(self, img):
         ''' Make previously-saved pixels red '''
-        if self.sat_btn and hasattr(self, 'saturated'):
+        if self.sat_btn and isinstance(self.sat_map, np.ndarray):
             if not is_color(img):
                 img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-            img[self.saturated] = (0, 0, 255)   # red
+            red_px = np.uint8((0, 0, 255))
+            img[self.sat_map] = red_px
         return img
 
     def process_img(self, img):
