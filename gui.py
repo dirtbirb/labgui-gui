@@ -110,9 +110,9 @@ class GuiDevice(object):
 
     def __init__(self, *args, **kwargs):
         super().__init__()
+        self.available = True
         self.panels = {}
         self.running = False
-        self.available = True
 
     def make_panel(self, parent, panel_name):
         return self.panels[panel_name](parent, device=self)
