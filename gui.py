@@ -37,6 +37,11 @@ CLR_BG = wx.Colour(0, 0, 0).MakeDisabled()
 
 # Helper functions ------------------------------------------------------------
 
+def attrib_name(name):
+    ''' Turn a string into an acceptable attribute name '''
+    return name.lower().replace(' ', '_')
+
+
 def is_color(img):
     ''' Return True if image contains a color channel, False otherwise '''
     return len(img.shape) == 3
@@ -351,21 +356,46 @@ class GuiPanel(wx.Panel):
         pass
 
 
-class HybridPanel(wx.Panel):
-    ''' Container panel to combine multiple GuiPanels '''
+class HybridPanel(GuiPanel):
+    ''' Container panel to combine multiple GuiPanels. '''
 
     def __init__(self, parent, panels, **kwargs):
-        super().__init__(parent, **kwargs)
         self.panels = panels
+        super().__init__(parent, **kwargs)
 
     def MakeLayout(self):
-        return self.panels
+        layout = []
+        for panel in self.panels:
+            built_panel = panel(self, device=self.device)
+            self.__setattr__(
+                attrib_name(built_panel.GetName() + "_panel"), built_panel)
+            layout.append(built_panel)
+        return layout
 
-    def MakeSizerAndFit(self, panels, orientation=wx.VERTICAL):
+    def MakeSizerAndFit(self, layout, orientation=wx.VERTICAL):
         panel_sizer = wx.BoxSizer(orientation)
-        for panel in panels:
-            panel_sizer.Add(panel)
+        for item in layout:
+            panel_sizer.Add(item)
+            panel_sizer.AddSpacer(PX_PAD)
         self.SetSizerAndFit(panel_sizer)
+
+    def reset(self, event=None):
+        ''' Pass reset events to child GuiPanels '''
+        for child in self.GetChildren():
+            if isinstance(child, GuiPanel):
+                child.reset(event)
+
+    def update(self, event=None):
+        ''' Pass update events to child GuiPanels '''
+        for child in self.GetChildren():
+            if isinstance(child, GuiPanel):
+                child.update(event)
+
+    def validate(self, event=None):
+        ''' Pass validate events to child GuiPanels '''
+        for child in self.GetChildren():
+            if isinstance(child, GuiPanel):
+                child.validate(event)
 
 
 class ViewPanel(GuiPanel):
@@ -747,7 +777,7 @@ class TextCtrlPanel(GuiPanel):
             # Bind function to ctrl
             field.Bind(wx.EVT_TEXT_ENTER, make_binding(field, func))
             # Expose ctrl as panel attribute
-            self.__setattr__(param.lower().replace(' ', '_'), field)
+            self.__setattr__(attrib_name(param, field))
             controls.append(field)
             i += 1
         self.controls.extend(controls)
