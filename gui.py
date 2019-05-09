@@ -115,6 +115,15 @@ class GuiDevice(object):
         self.running = False
 
     def make_panel(self, parent, panel_name):
+        # panel = self.panels[panel_name]
+        # if isinstance(panel, wx.Panel):
+        #     built_panel = panel(parent, device=self)
+        # elif isinstance(panel, (tuple, list)):
+        #     built_panel = panel[0](parent, *panel[1:], device=self)
+        # else:
+        #     raise TypeError("GuiDevice.make_panel requires a wx.Panel or "
+        #                     "(wx.Panel, arg_list) tuple.")
+        # return built_panel
         return self.panels[panel_name](parent, device=self)
 
     def make_panels(self, parent):
@@ -209,17 +218,28 @@ def FileDialog(msg, ext=None, save=False):
 
 # wx.Sizer --------------------------------------------------------------------
 
+class GuiItem():
+    ''' Item and layout information for use in wx.GridBagSizer construction.
+        Provides defaults and handles wx.GBPosition. '''
+
+    def __init__(self, item, position, span=SP1, flag=0):
+        self.item = item
+        self.position = wx.GBPosition(position)
+        self.span = span
+        self.flag = flag
+
+
 class GuiSizer(wx.GridBagSizer):
-    ''' wx.GridBagSizer that accepts list of elements to build itself '''
+    ''' wx.GridBagSizer that accepts list of GuiItems to build itself. '''
 
-    def __init__(self, *items, hpad=None, vpad=None):
+    def __init__(self, items=None, hpad=None, vpad=None):
         super().__init__(hpad or PX_PAD_INNER, vpad or PX_PAD_INNER)
-        for item in items:
-            self.Add(*item)
+        if items is not None:
+            self.AddList(items)
 
-    def AddList(sizer, *items):
+    def AddList(self, items):
         for item in items:
-            sizer.Add(*item)
+            self.Add(item.item, item.position, item.span, item.flag)
 
 
 # wx.Panel --------------------------------------------------------------------
@@ -232,7 +252,7 @@ class GuiPanel(wx.Panel):
         super().__init__(*args, **kwargs)
         self.controls = []      # GUI elements for reset/update/validate
         self.device = device
-        self.MakeSizerAndFit(*self.MakeLayout())
+        self.MakeSizerAndFit(self.MakeLayout())
         if self.device and not self.device.available:
             self.Disable()
 
@@ -297,9 +317,9 @@ class GuiPanel(wx.Panel):
             Override this to edit the panel layout. '''
         return []
 
-    def MakeSizerAndFit(self, *items):
+    def MakeSizerAndFit(self, items):
         ''' Similar to SetSizerAndFit, but creates a GuiSizer first. '''
-        self.SetSizerAndFit(GuiSizer(*items))
+        self.SetSizerAndFit(GuiSizer(items))
 
     def reset(self, event=None):
         ''' Reset GuiPanel elements to default state. '''
@@ -329,6 +349,23 @@ class GuiPanel(wx.Panel):
     def validate(self, event=None):
         ''' Placeholder. Check for valid input in GuiPanel elements. '''
         pass
+
+
+class HybridPanel(wx.Panel):
+    ''' Container panel to combine multiple GuiPanels '''
+
+    def __init__(self, parent, panels, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.panels = panels
+
+    def MakeLayout(self):
+        return self.panels
+
+    def MakeSizerAndFit(self, panels, orientation=wx.VERTICAL):
+        panel_sizer = wx.BoxSizer(orientation)
+        for panel in panels:
+            panel_sizer.Add(panel)
+        self.SetSizerAndFit(panel_sizer)
 
 
 class ViewPanel(GuiPanel):
@@ -396,14 +433,14 @@ class ViewPanel(GuiPanel):
 
         # Return layout for assembly
         layout = [
-            (self.MakeLabel(), wx.GBPosition(0, 0), SP2),
-            (source, wx.GBPosition(1, 0), SP2, wx.EXPAND),
-            (play_btn, wx.GBPosition(2, 0), SP1, wx.EXPAND),
-            (full_btn, wx.GBPosition(2, 1), SP1, wx.EXPAND),
-            (save_img_btn, wx.GBPosition(3, 0), SP1, wx.EXPAND),
-            (save_vid_btn, wx.GBPosition(3, 1), SP1, wx.EXPAND),
-            (fps_lbl, wx.GBPosition(4, 0), SP1, ALIGN_CENTER_RIGHT),
-            (fps, wx.GBPosition(4, 1)),
+            GuiItem(self.MakeLabel(), (0, 0), SP2),
+            GuiItem(source, (1, 0), SP2, wx.EXPAND),
+            GuiItem(play_btn, (2, 0), flag=wx.EXPAND),
+            GuiItem(full_btn, (2, 1), flag=wx.EXPAND),
+            GuiItem(save_img_btn, (3, 0), flag=wx.EXPAND),
+            GuiItem(save_vid_btn, (3, 1), flag=wx.EXPAND),
+            GuiItem(fps_lbl, (4, 0), flag=ALIGN_CENTER_RIGHT),
+            GuiItem(fps, (4, 1)),
             ]
         return layout
 
@@ -540,64 +577,64 @@ class ViewPanel(GuiPanel):
 
 # Sensor templates
 
-class MetricsPanel(GuiPanel):
-    ''' Metrics readout panel
-        Update values (not display!) by editing dict 'values'
-        Update display with most recent values with update()
-        Update list of values to be displayed with build()
-        Start regular updates by passing an Event flag to start()
-        Stop regular updates with stop() '''
-
-    def __init__(self, *args, name='Metrics', **kwargs):
-        if 'values' in kwargs:
-            self.values = kwargs.pop('values')
-        else:
-            self.values = {}
-        super().__init__(*args, name=name, **kwargs)
-        self.build()
-        self.updating = False
-
-    def build(self):
-        self.display = {}
-        new_items = [(self.MakeLabel(), wx.GBPosition(0, 0), SP2)]
-        for name in self.values:
-            # Replace 'None' with '-' just to keep it clean
-            v = self.values[name]
-            if v is None:
-                v = '-'
-            else:
-                v = str(v)
-            # Build display
-            i = len(new_items)
-            label = wx.StaticText(self, label=name + ': ')
-            value = wx.StaticText(self, label=v)
-            new_items.extend([
-                (label, wx.GBPosition(i, 0), SP1, ALIGN_CENTER_RIGHT),
-                (value, wx.GBPosition(i, 1))])
-            self.display[name] = value
-        self.MakeSizerAndFit(*new_items)
-
-    def update(self):
-        for name in self.values:
-            if name in self.display:
-                self.display[name].SetValue(str(self.values[name]))
-
-    def start(self, update_flag):
-        def __update_loop(self):
-            while True:
-                update_flag.wait()
-                self.update()
-                update_flag.clear()
-
-        self.updating = threading.Thread(
-            target=self.__update_loop, args=(update_flag, ))
-        self.updating.daemon = True
-        self.updating.start()
-
-    def stop(self):
-        if self.updating:
-            self.updating.terminate()
-        self.updating = False
+# class MetricsPanel(GuiPanel):
+#     ''' Metrics readout panel
+#         Update values (not display!) by editing dict 'values'
+#         Update display with most recent values with update()
+#         Update list of values to be displayed with build()
+#         Start regular updates by passing an Event flag to start()
+#         Stop regular updates with stop() '''
+#
+#     def __init__(self, *args, name='Metrics', **kwargs):
+#         if 'values' in kwargs:
+#             self.values = kwargs.pop('values')
+#         else:
+#             self.values = {}
+#         super().__init__(*args, name=name, **kwargs)
+#         self.build()
+#         self.updating = False
+#
+#     def build(self):
+#         self.display = {}
+#         new_items = [GuiItem(self.MakeLabel(), (0, 0), SP2)]
+#         for name in self.values:
+#             # Replace 'None' with '-' just to keep it clean
+#             v = self.values[name]
+#             if v is None:
+#                 v = '-'
+#             else:
+#                 v = str(v)
+#             # Build display
+#             i = len(new_items)
+#             label = wx.StaticText(self, label=name + ': ')
+#             value = wx.StaticText(self, label=v)
+#             new_items.extend([
+#                 GuiItem(label, (i, 0), flag=ALIGN_CENTER_RIGHT),
+#                 GuiItem(value, (i, 1))])
+#             self.display[name] = value
+#         self.MakeSizerAndFit(*new_items)
+#
+#     def update(self):
+#         for name in self.values:
+#             if name in self.display:
+#                 self.display[name].SetValue(str(self.values[name]))
+#
+#     def start(self, update_flag):
+#         def __update_loop(self):
+#             while True:
+#                 update_flag.wait()
+#                 self.update()
+#                 update_flag.clear()
+#
+#         self.updating = threading.Thread(
+#             target=self.__update_loop, args=(update_flag, ))
+#         self.updating.daemon = True
+#         self.updating.start()
+#
+#     def stop(self):
+#         if self.updating:
+#             self.updating.terminate()
+#         self.updating = False
 
 
 class RoiPanel(GuiPanel):
@@ -632,22 +669,21 @@ class RoiPanel(GuiPanel):
         self.w = w
         self.y = y
         self.h = h
-        self.controls = [apply, load, x, w, y, h]
+        self.controls.extend([apply, load, x, w, y, h])
         self.reset()
 
         layout = [
-            (self.MakeLabel(), wx.GBPosition(0, 0), SP3),
-            (offset_lbl, wx.GBPosition(1, 1), SP1,
-                wx.ALIGN_CENTER_HORIZONTAL),
-            (size_lbl, wx.GBPosition(1, 2), SP1, wx.ALIGN_CENTER_HORIZONTAL),
-            (x_lbl, wx.GBPosition(2, 0), SP1, ALIGN_CENTER_RIGHT),
-            (x, wx.GBPosition(2, 1), SP1),
-            (w, wx.GBPosition(2, 2), SP1),
-            (y_lbl, wx.GBPosition(3, 0), SP1, ALIGN_CENTER_RIGHT),
-            (y, wx.GBPosition(3, 1), SP1),
-            (h, wx.GBPosition(3, 2), SP1),
-            (apply, wx.GBPosition(4, 1), SP1),
-            (load, wx.GBPosition(4, 2), SP1)]
+            GuiItem(self.MakeLabel(), (0, 0), SP3),
+            GuiItem(offset_lbl, (1, 1), flag=wx.ALIGN_CENTER_HORIZONTAL),
+            GuiItem(size_lbl, (1, 2), flag=wx.ALIGN_CENTER_HORIZONTAL),
+            GuiItem(x_lbl, (2, 0), flag=ALIGN_CENTER_RIGHT),
+            GuiItem(x, (2, 1)),
+            GuiItem(w, (2, 2)),
+            GuiItem(y_lbl, (3, 0), flag=ALIGN_CENTER_RIGHT),
+            GuiItem(y, (3, 1)),
+            GuiItem(h, (3, 2)),
+            GuiItem(apply, (4, 1)),
+            GuiItem(load, (4, 2))]
         return layout
 
     def reset(self, event=None):
@@ -705,17 +741,16 @@ class TextCtrlPanel(GuiPanel):
             units = wx.StaticText(self, label=units)
             # Add GUI layout
             layout.extend([
-                (label, wx.GBPosition(i, j), SP1, ALIGN_CENTER_RIGHT),
-                (field, wx.GBPosition(i, j+1), SP1, wx.EXPAND),
-                (units, wx.GBPosition(i, j+2), SP1,
-                    wx.ALIGN_CENTER_VERTICAL)])
+                GuiItem(label, (i, j), flag=ALIGN_CENTER_RIGHT),
+                GuiItem(field, (i, j+1), flag=wx.EXPAND),
+                GuiItem(units, (i, j+2), flag=wx.ALIGN_CENTER_VERTICAL)])
             # Bind function to ctrl
             field.Bind(wx.EVT_TEXT_ENTER, make_binding(field, func))
             # Expose ctrl as panel attribute
             self.__setattr__(param.lower().replace(' ', '_'), field)
             controls.append(field)
             i += 1
-        self.controls = controls
+        self.controls.extend(controls)
         return layout
 
 
@@ -732,7 +767,7 @@ class CapturePanel(TextCtrlPanel):
             ('Framerate', 'fps', self.device.fps)
             ]
         layout = [
-            (self.MakeLabel(), wx.GBPosition(0, 0), SP3),
+            GuiItem(self.MakeLabel(), (0, 0), SP3),
             *self.build_textctrls(textctrls, (1, 0))
             ]
         return layout
@@ -742,6 +777,9 @@ class CapturePanel(TextCtrlPanel):
 
 class ColorPanel(GuiPanel):
     ''' Color processing '''
+
+    RED = np.uint8((0, 0, 255))
+    RNG8 = np.arange(0, 256)    # Pixel values for range_img
 
     def __init__(self, *args, name='Color', **kwargs):
         super().__init__(*args, name=name, **kwargs)
@@ -791,21 +829,21 @@ class ColorPanel(GuiPanel):
         self.gamma_val = gamma_val
         self.sat_btn = sat_btn
         self.sat_val = sat_val
-        self.controls = [
+        self.controls.extend([
             colormap, range_btn, range_val, gamma_btn, gamma_val, sat_btn,
-            sat_val]
+            sat_val])
 
         self.set_gamma()
 
         layout = [
-            (self.MakeLabel(), wx.GBPosition(0, 0), SP2),
-            (colormap, wx.GBPosition(1, 0), SP2, wx.EXPAND),
-            (range_btn, wx.GBPosition(2, 0), SP1, wx.EXPAND),
-            (range_val, wx.GBPosition(2, 1), SP1, wx.EXPAND),
-            (gamma_btn, wx.GBPosition(3, 0), SP1, wx.EXPAND),
-            (gamma_val, wx.GBPosition(3, 1), SP1, wx.EXPAND),
-            (sat_btn, wx.GBPosition(4, 0), SP1, wx.EXPAND),
-            (sat_val, wx.GBPosition(4, 1), SP1, wx.EXPAND)
+            GuiItem(self.MakeLabel(), (0, 0), SP2),
+            GuiItem(colormap, (1, 0), SP2, wx.EXPAND),
+            GuiItem(range_btn, (2, 0)),
+            GuiItem(range_val, (2, 1)),
+            GuiItem(gamma_btn, (3, 0)),
+            GuiItem(gamma_val, (3, 1)),
+            GuiItem(sat_btn, (4, 0)),
+            GuiItem(sat_val, (4, 1))
             ]
         return layout
 
@@ -814,9 +852,6 @@ class ColorPanel(GuiPanel):
         if self.range_btn:
             try:
                 v = np.clip(int(self.range_val), 0, 255)
-                # self.range_lut = np.array(
-                #     np.arange(0, v) * (255 / v)
-                # )
             except ValueError:
                 v = 255
             self.range_val = v
@@ -824,15 +859,15 @@ class ColorPanel(GuiPanel):
     def set_gamma(self, event=None):
         ''' Validate gamma value and create look-up table (LUT) '''
         if self.gamma_btn:
+            # Validate
             try:
-                # Validate
-                gamma = np.clip(self.gamma_val, 0.0, 10.0)
-                # Create look-up table (LUT)
-                self.gamma_lut = np.array(
-                    np.arange(0, 1, 1/256) ** (1/gamma) * 255 + 0.5, np.uint8)
+                gamma = np.clip(self.gamma_val, 1.0, 10.0)
             except ValueError:
                 gamma = 2.2
-            # Update GUI
+            # Create look-up table (LUT)
+            self.gamma_lut = np.uint8(
+                np.arange(0, 1, 1/256) ** (1/gamma) * 255 + 0.5)
+            # Update displayed value
             self.gamma_val = gamma
 
     def set_sat(self, event=None):
@@ -858,10 +893,11 @@ class ColorPanel(GuiPanel):
         if self.range_btn:
             img -= img.min()
             if self.sat_btn and isinstance(self.sat_map, np.ndarray):
-                f = self.range_val / img[~self.sat_map].max()
+                mx = img[~self.sat_map].max()       # Ignore saturated pixels
             else:
-                f = self.range_val / img.max()
-            img = np.uint8(img * f)
+                mx = img.max()
+            img = cv2.LUT(
+                img, np.uint8(self.RNG8 * self.range_val / mx))
         return img
 
     def gamma_img(self, img):
@@ -883,8 +919,7 @@ class ColorPanel(GuiPanel):
         if self.sat_btn and isinstance(self.sat_map, np.ndarray):
             if not is_color(img):
                 img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-            red_px = np.uint8((0, 0, 255))
-            img[self.sat_map] = red_px
+            img[self.sat_map] = self.RED
         return img
 
     def process_img(self, img):
@@ -919,13 +954,13 @@ class FlatFieldPanel(GuiPanel):
         self.save = save
         self.apply = apply
         self.thumb = thumb
-        self.controls = [save, apply, thumb]
+        self.controls.extend([save, apply, thumb])
 
         layout = [
-            (self.MakeLabel(), wx.GBPosition(0, 0), SP2),
-            (thumb, wx.GBPosition(1, 0), SP2, wx.ALIGN_CENTER),
-            (save, wx.GBPosition(2, 0), SP1),
-            (apply, wx.GBPosition(2, 1), SP1)
+            GuiItem(self.MakeLabel(), (0, 0), SP2),
+            GuiItem(thumb, (1, 0), SP2, wx.ALIGN_CENTER),
+            GuiItem(save, (2, 0)),
+            GuiItem(apply, (2, 1))
             ]
         return layout
 
@@ -998,20 +1033,20 @@ class TargetPanel(GuiPanel):
         self.px_x = px_x
         self.px_y = px_y
         self.reset_btn = reset_btn
-        self.controls = [target, size, x, y, px_x, px_y, reset_btn]
+        self.controls.extend([target, size, x, y, px_x, px_y, reset_btn])
 
         layout = [
-            (self.MakeLabel(), wx.GBPosition(0, 0), SP3),
-            (target, wx.GBPosition(1, 0), SP3, wx.EXPAND),
-            (size_lbl, wx.GBPosition(2, 0), SP1, ALIGN_CENTER_RIGHT),
-            (size, wx.GBPosition(2, 1), SP1, wx.EXPAND),
-            (reset_btn, wx.GBPosition(2, 2), SP1, wx.EXPAND),
-            (orig_lbl, wx.GBPosition(3, 0), SP1, ALIGN_CENTER_RIGHT),
-            (x, wx.GBPosition(3, 1), SP1, wx.EXPAND),
-            (y, wx.GBPosition(3, 2), SP1, wx.EXPAND),
-            (px_lbl, wx.GBPosition(4, 0), SP1, ALIGN_CENTER_RIGHT),
-            (px_x, wx.GBPosition(4, 1), SP1, ALIGN_CENTER_RIGHT | wx.EXPAND),
-            (px_y, wx.GBPosition(4, 2), SP1, ALIGN_CENTER_RIGHT | wx.EXPAND)
+            GuiItem(self.MakeLabel(), (0, 0), SP3),
+            GuiItem(target, (1, 0), SP3, wx.EXPAND),
+            GuiItem(size_lbl, (2, 0), flag=ALIGN_CENTER_RIGHT),
+            GuiItem(size, (2, 1), flag=wx.EXPAND),
+            GuiItem(reset_btn, (2, 2), flag=wx.EXPAND),
+            GuiItem(orig_lbl, (3, 0), flag=ALIGN_CENTER_RIGHT),
+            GuiItem(x, (3, 1), flag=wx.EXPAND),
+            GuiItem(y, (3, 2), flag=wx.EXPAND),
+            GuiItem(px_lbl, (4, 0), flag=ALIGN_CENTER_RIGHT),
+            GuiItem(px_x, (4, 1), flag=ALIGN_CENTER_RIGHT | wx.EXPAND),
+            GuiItem(px_y, (4, 2), flag=ALIGN_CENTER_RIGHT | wx.EXPAND)
             ]
         return layout
 
