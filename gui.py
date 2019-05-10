@@ -777,7 +777,7 @@ class TextCtrlPanel(GuiPanel):
             # Bind function to ctrl
             field.Bind(wx.EVT_TEXT_ENTER, make_binding(field, func))
             # Expose ctrl as panel attribute
-            self.__setattr__(attrib_name(param, field))
+            self.__setattr__(attrib_name(param), field)
             controls.append(field)
             i += 1
         self.controls.extend(controls)
