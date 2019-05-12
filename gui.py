@@ -144,19 +144,20 @@ class HybridDevice(GuiDevice):
         for device in self.devices:
             self.available &= device.available
 
-    # def make_panel(self, parent, panel_name):
-    #     ''' Make and return a child HybridPanel instance. '''
-    #     return self.panels[panel_name](parent, device=self)
+
+class GuiSensor(GuiDevice):
+    def __init__(self, img_queue, panels={}):
+        self.img_queue = img_queue
+        super().__init__(panels)
 
 
-class TestSensor(GuiDevice):
+class TestSensor(GuiSensor):
     ''' Test device, fills img_queue with random image data '''
 
     TIMEOUT = 1
 
     def __init__(self, img_queue):
         super().__init__(img_queue)
-        self.img_queue = img_queue
         self.img_thread = None
         self.start()
 
@@ -413,7 +414,7 @@ class ViewPanel(GuiPanel):
         # Panel management
         self.parent = parent        # Directly manipulate parent frame
         self.device_panels = []     # Panels loaded by last sensor
-        self.add_source('none', GuiDevice)
+        self.add_source('none', GuiSensor)
         self.GetElement('source').SetSelection(0)
         parent.Bind(wx.EVT_CLOSE, self.OnClose)     # HACK: must bind to frame
         # Fullscreen
