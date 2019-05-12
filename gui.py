@@ -113,23 +113,14 @@ class GuiDevice(object):
     ''' Mixin class to add GUI panel functionality to a device.
         Inherited by GUI submodules. '''
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, panels={}):
         super().__init__()
+        self.panels = panels
         self.available = True
-        self.panels = {}
         self.running = False
 
     def make_panel(self, parent, panel_name):
-        # panel = self.panels[panel_name]
-        # if isinstance(panel, wx.Panel):
-        #     built_panel = panel(parent, device=self)
-        # elif isinstance(panel, (tuple, list)):
-        #     built_panel = panel[0](parent, *panel[1:], device=self)
-        # else:
-        #     raise TypeError("GuiDevice.make_panel requires a wx.Panel or "
-        #                     "(wx.Panel, arg_list) tuple.")
-        # return built_panel
-        return self.panels[panel_name](parent, device=self)
+        return self.panels[panel_name](parent, self)
 
     def make_panels(self, parent):
         built_panels = []
@@ -142,6 +133,20 @@ class GuiDevice(object):
 
     def close(self):
         self.running = False
+
+
+class HybridDevice(GuiDevice):
+    ''' Container for multiple interacting GuiDevices. '''
+
+    def __init__(self, devices=[], panels={}):
+        super().__init__(panels)
+        self.devices = devices
+        for device in self.devices:
+            self.available &= device.available
+
+    # def make_panel(self, parent, panel_name):
+    #     ''' Make and return a child HybridPanel instance. '''
+    #     return self.panels[panel_name](parent, device=self)
 
 
 class TestSensor(GuiDevice):
@@ -253,13 +258,12 @@ class GuiPanel(wx.Panel):
     ''' Panel containing GUI elements that can be read/set like attributes
         Also can be passed a device object for GUI to interact with. '''
 
-    def __init__(self, *args, device=None, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, parent, device=None, **kwargs):
+        super().__init__(parent, **kwargs)
         self.controls = []      # GUI elements for reset/update/validate
         self.device = device
         self.MakeSizerAndFit(self.MakeLayout())
-        if self.device and not self.device.available:
-            self.Disable()
+        self.validate()
 
     def __getattribute__(self, name):
         ''' Retrieve value of GUI elements instead of elements themselves. '''
@@ -352,20 +356,21 @@ class GuiPanel(wx.Panel):
             control.GetEventHandler().ProcessEvent(event)
 
     def validate(self, event=None):
-        ''' Placeholder. Check for valid input in GuiPanel elements. '''
-        pass
+        ''' Verify device and check for valid input in GuiPanel elements. '''
+        if self.device and not self.device.available:
+            self.Disable()
 
 
 class HybridPanel(GuiPanel):
     ''' Container panel to combine multiple GuiPanels. '''
 
-    def __init__(self, parent, panels, **kwargs):
+    def __init__(self, parent, device=None, panels={}, **kwargs):
         self.panels = panels
-        super().__init__(parent, **kwargs)
+        super().__init__(parent, device, **kwargs)
 
     def MakeLayout(self):
         layout = []
-        for panel in self.panels:
+        for panel in self.panel_info:
             built_panel = panel(self, device=self.device)
             self.__setattr__(
                 attrib_name(built_panel.GetName() + "_panel"), built_panel)
