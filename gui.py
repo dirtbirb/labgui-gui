@@ -507,20 +507,21 @@ class ViewPanel(GuiPanel):
             panel.update()
 
     # Manage sources -------------------------------
-    def add_source(self, name, obj):
+    def add_source(self, name, obj, set_source=False):
         # Append name to GUI, append obj to ClientData for that selection
         source_select = self.GetElement('source')
         source_select.Append(name, obj)
-        source_select.SetSelection(0)
-        event = wx.PyCommandEvent(wx.EVT_CHOICE.typeId, source_select.GetId())
-        wx.PostEvent(source_select.GetEventHandler(), event)
+        if set_source:
+            self.set_source()
 
-    def add_sources(self, sources):
+    def add_sources(self, sources, set_source=False):
         if isinstance(sources, list):   # Add each from the list
             for s in sources:
                 self.add_source(*s)
         else:
             self.add_source(sources)    # If not actually a list
+        if set_source:
+            self.set_source()
 
     def del_source(self, index):
         self.GetElement('source').Delete(index)
@@ -563,6 +564,10 @@ class ViewPanel(GuiPanel):
             layout['bottom'].insert(i+1, new_panel)
         # Reassemble GUI
         parent.Assemble()
+
+    def set_source(self, i=0):
+        self.GetElement('source').SetSelection(i)
+        self.select_source()
 
     # Manage display -------------------------------
     def fullscreen(self, event=None):
