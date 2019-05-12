@@ -414,8 +414,6 @@ class ViewPanel(GuiPanel):
         # Panel management
         self.parent = parent        # Directly manipulate parent frame
         self.device_panels = []     # Panels loaded by last sensor
-        self.add_source('none', GuiSensor)
-        self.GetElement('source').SetSelection(0)
         parent.Bind(wx.EVT_CLOSE, self.OnClose)     # HACK: must bind to frame
         # Fullscreen
         self.full_frame = FullscreenFrame(
@@ -511,7 +509,11 @@ class ViewPanel(GuiPanel):
     # Manage sources -------------------------------
     def add_source(self, name, obj):
         # Append name to GUI, append obj to ClientData for that selection
-        self.GetElement('source').Append(name, obj)
+        source_select = self.GetElement('source')
+        source_select.Append(name, obj)
+        source_select.SetSelection(0)
+        event = wx.PyCommandEvent(wx.EVT_CHOICE.typeId, source_select.GetId())
+        wx.PostEvent(source_select.GetEventHandler(), event)
 
     def add_sources(self, sources):
         if isinstance(sources, list):   # Add each from the list
