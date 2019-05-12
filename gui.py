@@ -144,6 +144,20 @@ class HybridDevice(GuiDevice):
         for device in self.devices:
             self.available &= device.available
 
+    def start(self):
+        running = True
+        for device in self.devices:
+            running &= device.start()
+        if not running:
+            self.close()
+        else:
+            self.running = running
+
+    def close(self):
+        for device in self.devices:
+            device.close()
+        self.running = False
+
 
 class GuiSensor(GuiDevice):
     def __init__(self, img_queue, panels={}):
