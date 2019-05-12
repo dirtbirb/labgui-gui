@@ -974,8 +974,8 @@ class FlatFieldPanel(GuiPanel):
     ''' Flat field controls '''
 
     def __init__(self, *args, name='Flat field', **kwargs):
-        super().__init__(*args, name=name, **kwargs)
         self.ff = None      # Flat frame
+        super().__init__(*args, name=name, **kwargs)
         self.GetParent().img_processes['full'].append(self.process_img)
 
     def MakeLayout(self):
