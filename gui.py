@@ -48,23 +48,17 @@ def is_color(img):
 
 
 def make_binding(obj, func):
+    ''' Set parameter if given, update GUI with returned value '''
+
     def textctrl_binding(event):
-        val = obj.GetValue()
-        try:
-            val = float(val)
-        except ValueError:  # HACK: Reject '' or any non-numeric string
-            val = None
-        # Set parameter if given, update GUI with current value
-        ret = func(val)
-        if ret is False:
-            ret = ''
-        else:
-            ret = str(ret)
-        obj.SetValue(ret)
+        ret = func(to_float(obj.GetValue()))
+        if not (ret is None or isinstance(ret, bool)):
+            obj.SetValue(str(ret))
 
     def item_container_binding(event):
-        # Set parameter if given, update GUI with current value
-        obj.SetSelection(func(obj.GetSelection()))
+        ret = func(obj.GetSelection())
+        if isinstance(ret, (int, float, bool)):
+            obj.SetValue(int(ret))
 
     if isinstance(obj, wx.TextCtrl):
         binding = textctrl_binding
@@ -239,6 +233,20 @@ def FileDialog(msg, ext=None, save=False):
     else:                               # If clicked "Cancel"
         fn = False
     return fn
+
+
+class TextCtrl(wx.TextCtrl):
+    ''' TextCtrl with built-in maximum length, not fully implemented in wx '''
+
+    def __init__(self, *args, length=0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.SetMaxLength(length)
+        self.MaxLength = length
+
+    def SetValue(self, value):
+        if self.MaxLength:
+            value = value[:self.MaxLength]
+        super().SetValue(value)
 
 
 # wx.Sizer --------------------------------------------------------------------
@@ -704,11 +712,11 @@ class RoiPanel(GuiPanel):
         offset_lbl = wx.StaticText(self, label='Offset')
         size_lbl = wx.StaticText(self, label='Size')
         x_lbl = wx.StaticText(self, label='x')
-        x = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
-        w = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
+        x = TextCtrl(self, size=SZ1, length=6, style=wx.TE_PROCESS_ENTER)
+        w = TextCtrl(self, size=SZ1, length=6, style=wx.TE_PROCESS_ENTER)
         y_lbl = wx.StaticText(self, label='y')
-        y = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
-        h = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
+        y = TextCtrl(self, size=SZ1, length=6, style=wx.TE_PROCESS_ENTER)
+        h = TextCtrl(self, size=SZ1, length=6, style=wx.TE_PROCESS_ENTER)
         apply = wx.Button(self, label='Set', size=SZ1)
         load = wx.Button(self, label='Load', size=SZ1)
 
@@ -776,8 +784,8 @@ class TextCtrlPanel(GuiPanel):
     ''' Provides build_settings as a helper method to create control panels
         from a list of settings. '''
 
-    def build_textctrls(self, textctrls, start=(0, 0)):
-        ''' Build column of functional wx.TextCtrls from a list of parameters.
+    def build_textctrls(self, textctrls, start=(0, 0), length=0):
+        ''' Build column of functional TextCtrls from a list of parameters.
             textctrls: List of parameter tuples for which to build controls:
                 (label, units, function)
             start: (row, column) tuple of first element
@@ -793,8 +801,10 @@ class TextCtrlPanel(GuiPanel):
         for param, units, func in textctrls:
             # Create GUI layout
             label = wx.StaticText(self, label=param)
-            field = wx.TextCtrl(
-                self, size=SZ2, value='', style=wx.TE_PROCESS_ENTER)
+            field = TextCtrl(
+                self, size=SZ2, value='', length=length,
+                style=wx.TE_PROCESS_ENTER)
+            field.SetMaxLength(length)
             units = wx.StaticText(self, label=units)
             # Add GUI layout
             layout.extend([
@@ -863,14 +873,14 @@ class ColorPanel(GuiPanel):
         colormap = wx.Choice(self, choices=colormaps)
         colormap.SetSelection(1)     # no colormap
         range_btn = wx.ToggleButton(self, label='Range', size=SZ2)
-        range_val = wx.TextCtrl(
-            self, value='255', size=SZ1, style=wx.TE_PROCESS_ENTER)
+        range_val = TextCtrl(
+            self, value='255', size=SZ1, length=3, style=wx.TE_PROCESS_ENTER)
         gamma_btn = wx.ToggleButton(self, label='Gamma', size=SZ2)
-        gamma_val = wx.TextCtrl(
-            self, value='2.2', size=SZ1, style=wx.TE_PROCESS_ENTER)
+        gamma_val = TextCtrl(
+            self, value='2.2', size=SZ1, length=5, style=wx.TE_PROCESS_ENTER)
         sat_btn = wx.ToggleButton(self, label='Highlight', size=SZ2)
-        sat_val = wx.TextCtrl(
-            self, value='255', size=SZ1, style=wx.TE_PROCESS_ENTER)
+        sat_val = TextCtrl(
+            self, value='255', size=SZ1, length=3, style=wx.TE_PROCESS_ENTER)
 
         range_btn.Bind(wx.EVT_TOGGLEBUTTON, self.set_range)
         range_val.Bind(wx.EVT_TEXT_ENTER, self.set_range)
@@ -1069,12 +1079,12 @@ class TargetPanel(GuiPanel):
         targets = ('no target', 'crosshair', 'box', 'circle')
         target = wx.Choice(self, choices=targets)
         size_lbl = wx.StaticText(self, label='Size ')
-        size = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
+        size = TextCtrl(self, size=SZ1, length=4, style=wx.TE_PROCESS_ENTER)
         reset_btn = wx.Button(
             self, label='Reset', size=SZ1, style=wx.BU_EXACTFIT)
         orig_lbl = wx.StaticText(self, label='Origin ')
-        x = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
-        y = wx.TextCtrl(self, size=SZ1, style=wx.TE_PROCESS_ENTER)
+        x = TextCtrl(self, size=SZ1, length=4, style=wx.TE_PROCESS_ENTER)
+        y = TextCtrl(self, size=SZ1, length=4, style=wx.TE_PROCESS_ENTER)
         px_lbl = wx.StaticText(self, label='x, y ')
         px_x = wx.StaticText(self, style=wx.ALIGN_RIGHT)
         px_y = wx.StaticText(self, style=wx.ALIGN_RIGHT)
