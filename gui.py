@@ -1331,6 +1331,8 @@ class GuiFrame(wx.Frame):
             for process in img_processes['full']:
                 sensor_img = process(sensor_img)
             # Resize to target window
+            if sensor_img.dtype == np.uint16:
+                sensor_img = np.uint8(sensor_img)
             if view_panel.full_btn:
                 window = full_window
             else:
