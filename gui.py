@@ -51,14 +51,19 @@ def make_binding(obj, func):
     ''' Set parameter if given, update GUI with returned value '''
 
     def textctrl_binding(event):
-        ret = func(to_float(obj.GetValue()))
+        val = to_float(obj.GetValue())
+        if isinstance(val, str):
+            val = val.rstrip()
+            if val == '':
+                val = None
+        ret = func(val)
         if not (ret is None or isinstance(ret, bool)):
             obj.SetValue(str(ret))
 
     def item_container_binding(event):
         ret = func(obj.GetSelection())
         if isinstance(ret, (int, float, bool)):
-            obj.SetValue(int(ret))
+            obj.SetSelection(int(ret))
 
     if isinstance(obj, wx.TextCtrl):
         binding = textctrl_binding
