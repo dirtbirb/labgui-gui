@@ -14,7 +14,7 @@ PX_PAD_INNER = 3
 PX_PAD_OUTER = 10
 
 # wx.Size
-SZ_IMAGE = wx.Size(1280, 800)
+SZ_IMAGE = wx.Size(1280, 800)           # (W, H); opposite of NumPy
 SZ_THUMB = wx.Size(128, 80)
 SZ_BTN = wx.Size(2*PX_PAD, 2*PX_PAD)
 SZ1 = wx.Size(2*PX_PAD, PX_PAD)
@@ -104,7 +104,7 @@ def top_px_avg(img, n=3):
 
 # Devices ---------------------------------------------------------------------
 
-def test_image(shape=SZ_IMAGE[::-1]):
+def test_image(shape=SZ_IMAGE[::-1]):   # [::-1] reverses order for NumPy
     ''' Generate random uint8 image of given shape '''
     return np.random.randint(0, 256, shape, np.uint8)
 
@@ -290,7 +290,7 @@ class GuiPanel(wx.Panel):
             if isinstance(elem, (wx.TextCtrl, wx.ToggleButton)):
                 return to_float(elem.GetValue())
             # Return index of Choice, ComboBox, RadioBox
-            # HACK: This prevents GetStringSelection, use GetElement for that
+            # HACK: This prevents GetStringSelection, use GetObject for that
             elif isinstance(elem, wx.ItemContainerImmutable):
                 return elem.GetSelection()
             # Return text value of StaticText, as float if possible
@@ -328,7 +328,7 @@ class GuiPanel(wx.Panel):
         # Set anything else as normal
         object.__setattr__(self, name, value)
 
-    def GetElement(self, name):
+    def GetObject(self, name):
         ''' Bypass custom __getattribute__ to return a wx object. '''
         return object.__getattribute__(self, name)
 
@@ -523,7 +523,7 @@ class ViewPanel(GuiPanel):
     # Manage sources -------------------------------
     def add_source(self, name, obj, set_source=False):
         # Append name to GUI, append obj to ClientData for that selection
-        source_select = self.GetElement('source')
+        source_select = self.GetObject('source')
         source_select.Append(name, obj)
         if set_source:
             self.set_source()
@@ -538,7 +538,7 @@ class ViewPanel(GuiPanel):
             self.set_source()
 
     def del_source(self, index):
-        self.GetElement('source').Delete(index)
+        self.GetObject('source').Delete(index)
 
     def select_source(self, event=None):
         parent = self.parent
@@ -565,7 +565,7 @@ class ViewPanel(GuiPanel):
         while not img_queue.empty():        # Purge any queued frames
             img_queue.get(False)
         # Create new device
-        new_device = self.GetElement('source').GetClientData(source_index)
+        new_device = self.GetObject('source').GetClientData(source_index)
         try:
             self.device = new_device(img_queue)
         except Exception as e:
@@ -580,7 +580,7 @@ class ViewPanel(GuiPanel):
         parent.Assemble()
 
     def set_source(self, i=0):
-        self.GetElement('source').SetSelection(i)
+        self.GetObject('source').SetSelection(i)
         self.select_source()
 
     # Manage display -------------------------------
@@ -1294,7 +1294,7 @@ class GuiFrame(wx.Frame):
         GRAY2RGB = cv2.COLOR_GRAY2RGB
         cvtColor = cv2.cvtColor
         resize = cv2.resize
-        display_queue = self.display_queue
+        display_put = self.display_queue.put
         img_window = self.img_window
         img_processes = self.img_processes
         img_get = self.img_queue.get
@@ -1327,7 +1327,7 @@ class GuiFrame(wx.Frame):
             else:                       # from grayscale
                 cvt_method = GRAY2RGB
             window.Refresh()
-            display_queue.put(cvtColor(display_img, cvt_method))
+            display_put(cvtColor(display_img, cvt_method))
             view_panel.frames += 1
 
     def Assemble(self):
