@@ -385,8 +385,11 @@ class GuiPanel(wx.Panel):
 
     def validate(self, event=None):
         ''' Verify device and check for valid input in GuiPanel elements. '''
+        ret = True
         if self.device and not self.device.available:
             self.Disable()
+            ret = False
+        return ret
 
 
 class HybridPanel(GuiPanel):
