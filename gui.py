@@ -246,9 +246,18 @@ class TextCtrl(wx.TextCtrl):
     def __init__(self, *args, length=0, **kwargs):
         super().__init__(*args, **kwargs)
         self.SetMaxLength(length)
-        self.MaxLength = length
+
+    def GetMaxLength(self):
+        ''' Method not provided by wx, use attribute instead '''
+        return self.MaxLength
+
+    def SetMaxLength(self, length):
+        ''' Do wx SetMaxLength() then save length as attribute '''
+        super().SetMaxLength(length)
+        self.MaxLength = length         # for GetMaxLength
 
     def SetValue(self, value):
+        ''' Truncate string to self.MaxLength before wx SetValue() '''
         if self.MaxLength:
             value = value[:self.MaxLength]
         super().SetValue(value)
