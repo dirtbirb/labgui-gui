@@ -83,6 +83,15 @@ def to_float(value):
     return value
 
 
+def to_rgb(img):
+    ''' Convert grayscale or BGR (OpenCV default) to RGB (wx default) '''
+    if is_color(img):       # from BGR (assumed)
+        cvt_method = cv2.COLOR_BGR2RGB
+    else:                   # from grayscale
+        cvt_method = cv2.COLOR_GRAY2RGB
+    return cv2.cvtColor(img, cvt_method)
+
+
 def top_px(img, n=1):
     ''' Return top nth pixel from an image '''
     if n == 1:
@@ -429,15 +438,17 @@ class HybridPanel(GuiPanel):
 
     def validate(self, event=None):
         ''' Pass validate events to child GuiPanels '''
+        ret = True
         for child in self.GetChildren():
             if isinstance(child, GuiPanel):
-                child.validate(event)
+                ret &= child.validate(event)
+        return ret
 
 
 class ViewPanel(GuiPanel):
     ''' View options
-        Unlike other panels, this panel is tightly integrated with BasicGui.
-        Many functions use GetParent() to manipulate BasicGui directly. '''
+        Unlike other panels, this panel is tightly integrated with GuiFrame.
+        Many functions use self.parent to manipulate GuiFrame directly. '''
 
     def __init__(self, parent, img_queue, name='View', **kwargs):
         super().__init__(parent, name=name, **kwargs)
@@ -629,14 +640,15 @@ class ViewPanel(GuiPanel):
 
     def save_vid(self, event=None):
         ''' Start/stop recording, with save dialog '''
-        flag = self.GetParent().img_show
+        parent = self.parent
+        flag = parent.img_show
         flag.clear()    # Pause capture
         if self.play_btn and self.save_vid_btn:
             fn = FileDialog('Save video', '.avi', save=True)
             if fn:                  # Start recording
                 codec = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
                 fps = 10
-                shape = self.GetParent().image.shape[:2][::-1]
+                shape = parent.image.shape[:2][::-1]
                 self.video_writer = cv2.VideoWriter(fn, codec, fps, shape)
             else:                   # Cancel recording
                 self.save_vid_btn = False
@@ -767,8 +779,7 @@ class RoiPanel(GuiPanel):
         self.apply = False
 
     def set_roi(self, event=None):
-        self.validate()
-        if not self.device or not self.device.running:
+        if not self.validate() or not self.device or not self.device.running:
             return
         self.x, self.y, self.w, self.h = self.device.roi(
             (self.x, self.y, self.w, self.h))
@@ -779,6 +790,7 @@ class RoiPanel(GuiPanel):
         self.apply = apply
 
     def validate(self, event=None):
+        ret = True
         try:
             self.x = np.clip(self.x, 0, 1)
             self.y = np.clip(self.y, 0, 1)
@@ -786,6 +798,8 @@ class RoiPanel(GuiPanel):
             self.h = np.clip(self.h, self.y, 1)
         except (ValueError, TypeError):
             self.reset()
+            ret = False
+        return ret
 
 
 class TextCtrlPanel(GuiPanel):
@@ -940,8 +954,8 @@ class ColorPanel(GuiPanel):
             except ValueError:
                 gamma = 2.2
             # Create look-up table (LUT)
-            self.gamma_lut = np.uint8(
-                np.arange(0, 1, 1/256) ** (1/gamma) * 255 + 0.5)
+            self.gamma_lut = (np.arange(0, 1, 1/256) ** (1/gamma) * 255 + 0.5
+                              ).astype(np.uint8)
             # Update displayed value
             self.gamma_val = gamma
 
@@ -953,6 +967,10 @@ class ColorPanel(GuiPanel):
             except ValueError:
                 v = 255
             self.sat_val = v
+
+    def is_sat(self):
+        ''' Check if saturated pixel highlighting is active and ready. '''
+        return self.sat_btn and isinstance(self.sat_map, np.ndarray)
 
     def colormap_img(self, img):
         ''' Apply selected colormap by index '''
@@ -967,12 +985,12 @@ class ColorPanel(GuiPanel):
         ''' Stretch dynamic range to be from 0 to self.range_val '''
         if self.range_btn:
             img -= img.min()
-            if self.sat_btn and isinstance(self.sat_map, np.ndarray):
+            if self.is_sat():
                 mx = img[~self.sat_map].max()       # Ignore saturated pixels
             else:
                 mx = img.max()
             img = cv2.LUT(
-                img, np.uint8(self.RNG8 * self.range_val / mx))
+                img, (self.RNG8 * self.range_val / mx).astype(np.uint8))
         return img
 
     def gamma_img(self, img):
@@ -991,7 +1009,7 @@ class ColorPanel(GuiPanel):
 
     def apply_sat_img(self, img):
         ''' Make previously-saved pixels red '''
-        if self.sat_btn and isinstance(self.sat_map, np.ndarray):
+        if self.is_sat():
             if not is_color(img):
                 img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
             img[self.sat_map] = self.RED
@@ -1041,29 +1059,36 @@ class FlatFieldPanel(GuiPanel):
 
     def save(self, event=None):
         ''' Update flat field and thumbnail '''
-        # Save camera image
-        self.ff = self.GetParent().image.copy()
+        # Save copy of camera image
+        ff = self.GetParent().image.copy()
+        self.ff = ff
+        # Convert to 8-bit for thumbnail display
+        if ff.dtype == np.uint16:
+            ff = (ff.copy() >> 8).astype(np.uint8)
+        # Resize to thumbnail window and convert to RGB
+        self.thumb.image = to_rgb(cv2.resize(ff, tuple(SZ_THUMB)))
+        # Display thumbnail
+        self.thumb.Refresh()
 
-        # Update thumbnail on gui
-        thumb = cv2.resize(self.ff, tuple(SZ_THUMB))
-        if is_color(thumb):
-            thumb = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
-        else:
-            thumb = cv2.cvtColor(thumb, cv2.COLOR_GRAY2RGB)
-        self.thumb.image = thumb
+    def reset(self, event=None):
+        self.apply = False
+        self.thumb.image = None
         self.thumb.Refresh()
 
     def validate(self, event=None):
+        ret = True
         if self.ff is None:
-            self.apply = False
+            self.reset()
+            ret = False
+        return ret
 
     def flatfield_img(self, img):
         if self.apply:
             # Cancel if image size or color depth has changed
-            if self.ff.shape != img.shape:
-                self.apply = False
+            if self.ff.shape != img.shape or self.ff.dtype is not img.dtype:
+                self.reset()
             else:
-                img = np.where(img > self.ff, img - self.ff, 0)
+                img = cv2.subtract(img, self.ff)    # clips between 0-255
         return img
 
     def process_img(self, img):
@@ -1308,10 +1333,6 @@ class GuiFrame(wx.Frame):
         ''' Run method for image display thread '''
 
         # Caching (avoids extra lookups, probably useless)
-        BGR2RGB = cv2.COLOR_BGR2RGB
-        GRAY2RGB = cv2.COLOR_GRAY2RGB
-        cvtColor = cv2.cvtColor
-        resize = cv2.resize
         display_put = self.display_queue.put
         img_window = self.img_window
         img_processes = self.img_processes
@@ -1322,32 +1343,26 @@ class GuiFrame(wx.Frame):
 
         while True:
             wait()                      # Wait for GUI "start"
-            sensor_img = img_get()      # Wait for available image
-            if sensor_img is None:      # Skip image errors
-                print("Debug: 'None' found in image queue, skipped ")
-                continue
+            self.image = img_get()      # Save image once available
             # Process full-frame image
-            self.image = sensor_img     # Make image available to panels
+            sensor_img = self.image.copy()
             for process in img_processes['full']:
                 sensor_img = process(sensor_img)
-            # Resize to target window
+            # Convert to 8-bit
             if sensor_img.dtype == np.uint16:
-                sensor_img = np.uint8(sensor_img)
+                sensor_img = (sensor_img >> 8).astype(np.uint8)
+            # Resize to target window
             if view_panel.full_btn:
                 window = full_window
             else:
                 window = img_window
-            display_img = resize(sensor_img, tuple(window.GetSize()))
+            display_img = cv2.resize(sensor_img, tuple(window.GetSize()))
             # Process resized image
             for process in img_processes['resized']:
                 display_img = process(display_img)
-            # Convert to RGB and send to wx
-            if is_color(display_img):   # from BGR (OpenCV native format)
-                cvt_method = BGR2RGB
-            else:                       # from grayscale
-                cvt_method = GRAY2RGB
+            # Send to wx as RGB
             window.Refresh()
-            display_put(cvtColor(display_img, cvt_method))
+            display_put(to_rgb(display_img))
             view_panel.frames += 1
 
     def Assemble(self):
