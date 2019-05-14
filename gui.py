@@ -459,12 +459,13 @@ class ViewPanel(GuiPanel):
         Unlike other panels, this panel is tightly integrated with GuiFrame.
         Many functions use self.parent to manipulate GuiFrame directly. '''
 
-    def __init__(self, parent, img_queue, name='View', **kwargs):
+    def __init__(self, parent, img_queue, name='View', fps_time=5,
+                 **kwargs):
         super().__init__(parent, name=name, **kwargs)
         # Panel management
         self.parent = parent        # Directly manipulate parent frame
         self.device_panels = []     # Panels loaded by last sensor
-        parent.Bind(wx.EVT_CLOSE, self.OnClose)     # HACK: must bind to frame
+        parent.Bind(wx.EVT_CLOSE, self.OnClose)     # EVT_CLOSE requires frame
         # Fullscreen
         self.full_frame = FullscreenFrame(
             self, img_queue, parent.img_processes['dc'])
@@ -473,6 +474,7 @@ class ViewPanel(GuiPanel):
         self.video_writer = None    # cv2.VideoWriter
         parent.img_processes['full'].append(self.save_frame)
         # FPS (frames per second) counter
+        self.fps_time = fps_time
         self.frames = 0
         fps_thread = threading.Thread(target=self.__fps_loop)
         fps_thread.daemon = True
@@ -486,14 +488,13 @@ class ViewPanel(GuiPanel):
         while True:
             wait()
             f0 = self.frames
-            time.sleep(1)
-            wx.CallAfter(update, str(self.frames - f0))     # Thread-safe
+            time.sleep(self.fps_time)
+            wx.CallAfter(update, str((self.frames - f0) / self.fps_time))
 
     def MakeLayout(self):
         # Make GUI elements
         source = wx.Choice(self, size=WD2)
-        source.SetSelection(0)
-        play_btn = wx.ToggleButton(self, label='Play', size=SZ1)
+        play_btn = wx.ToggleButton(self, label='Start', size=SZ1)
         full_btn = wx.ToggleButton(self, label='Full', size=SZ1)
         save_img_btn = wx.Button(self, label='Save', size=SZ1)
         save_vid_btn = wx.ToggleButton(self, label='Record', size=SZ1)
@@ -524,8 +525,7 @@ class ViewPanel(GuiPanel):
             GuiItem(save_img_btn, (3, 0), flag=wx.EXPAND),
             GuiItem(save_vid_btn, (3, 1), flag=wx.EXPAND),
             GuiItem(fps_lbl, (4, 0), flag=ALIGN_CENTER_RIGHT),
-            GuiItem(fps, (4, 1)),
-            ]
+            GuiItem(fps, (4, 1))]
         return layout
 
     def OnClose(self, event):
@@ -651,7 +651,7 @@ class ViewPanel(GuiPanel):
         ''' Start/stop recording, with save dialog '''
         parent = self.parent
         flag = parent.img_show
-        flag.clear()    # Pause capture
+        flag.clear()            # Pause capture
         if self.play_btn and self.save_vid_btn:
             fn = FileDialog('Save video', '.avi', save=True)
             if fn:                  # Start recording
@@ -661,12 +661,12 @@ class ViewPanel(GuiPanel):
                 self.video_writer = cv2.VideoWriter(fn, codec, fps, shape)
             else:                   # Cancel recording
                 self.save_vid_btn = False
-        else:                       # Finish recording
+        else:                   # Finish recording
             time.sleep(0.5)     # Wait for img pipeline (unnecessary?)
             if self.video_writer:
                 self.video_writer.release()
             self.video_writer = None
-        flag.set()      # Continue capture
+        flag.set()              # Continue capture
 
 
 # Sensor templates
@@ -862,12 +862,10 @@ class CapturePanel(TextCtrlPanel):
         textctrls = [
             ('Exposure', 'us', self.device.exposure),
             ('Gain', '', self.device.gain),
-            ('Framerate', 'fps', self.device.fps)
-            ]
+            ('Framerate', 'fps', self.device.fps)]
         layout = [
             GuiItem(self.MakeLabel(), (0, 0), SP3),
-            *self.build_textctrls(textctrls, (1, 0))
-            ]
+            *self.build_textctrls(textctrls, (1, 0))]
         return layout
 
 
@@ -886,7 +884,7 @@ class ColorPanel(GuiPanel):
         self.GetParent().img_processes['resized'].append(self.process_img)
 
     def MakeLayout(self):
-        colormaps = (
+        colormaps = (               # defined to match OpenCV indices
             'force gray',
             'no mapping',
             'autumn',
@@ -941,8 +939,7 @@ class ColorPanel(GuiPanel):
             GuiItem(gamma_btn, (3, 0)),
             GuiItem(gamma_val, (3, 1)),
             GuiItem(sat_btn, (4, 0)),
-            GuiItem(sat_val, (4, 1))
-            ]
+            GuiItem(sat_val, (4, 1))]
         return layout
 
     def set_range(self, event=None):
@@ -1062,8 +1059,7 @@ class FlatFieldPanel(GuiPanel):
             GuiItem(self.MakeLabel(), (0, 0), SP2),
             GuiItem(thumb, (1, 0), SP2, wx.ALIGN_CENTER),
             GuiItem(save, (2, 0)),
-            GuiItem(apply, (2, 1))
-            ]
+            GuiItem(apply, (2, 1))]
         return layout
 
     def save(self, event=None):
@@ -1155,8 +1151,7 @@ class TargetPanel(GuiPanel):
             GuiItem(y, (3, 2), flag=wx.EXPAND),
             GuiItem(px_lbl, (4, 0), flag=ALIGN_CENTER_RIGHT),
             GuiItem(px_x, (4, 1), flag=ALIGN_CENTER_RIGHT | wx.EXPAND),
-            GuiItem(px_y, (4, 2), flag=ALIGN_CENTER_RIGHT | wx.EXPAND)
-            ]
+            GuiItem(px_y, (4, 2), flag=ALIGN_CENTER_RIGHT | wx.EXPAND)]
         return layout
 
     def reset(self, event=None):
@@ -1316,8 +1311,7 @@ class GuiFrame(wx.Frame):
         self.img_processes = {
             'full': [],
             'resized': [],
-            'dc': []
-            }
+            'dc': []}
         self.display_queue = queue.Queue(1)
 
         # GUI elements
@@ -1330,8 +1324,7 @@ class GuiFrame(wx.Frame):
         self.layout = {
             'left': [],
             'right': [self.img_window],
-            'bottom': [self.view_panel]
-            }
+            'bottom': [self.view_panel]}
 
         # Start display thread
         self.img_thread = threading.Thread(target=self.__display_loop)
