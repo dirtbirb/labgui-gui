@@ -1268,7 +1268,7 @@ class VideoWindow(ImageWindow):
             return
         # Skip frame if not resized properly (window recently changed size)
         size = self.GetSize()
-        if size == img.shape[:2][::-1]:
+        if size == img.shape[:2][::-1]:     # Reverse (h, w) from numpy to wx
             # Draw image and update
             dc = wx.PaintDC(self)
             dc.DrawBitmap(wx.Bitmap.FromBuffer(*size, img), 0, 0)
@@ -1344,25 +1344,24 @@ class GuiFrame(wx.Frame):
         full_window = view_panel.full_frame.img_window
 
         while True:
-            wait()                      # Wait for GUI "start"
-            self.image = img_get()      # Save image once available
+            # Get image once available
+            # BUG: self.image = img_get() occasionally freezes at high fps
+            wait()
+            sensor_img = img_get()
+            self.image = sensor_img.copy()
             # Process full-frame image
-            sensor_img = self.image.copy()
             for process in img_processes['full']:
                 sensor_img = process(sensor_img)
             # Convert to 8-bit
             if sensor_img.dtype == np.uint16:
                 sensor_img = (sensor_img >> 8).astype(np.uint8)
-            # Resize to target window
-            if view_panel.full_btn:
-                window = full_window
-            else:
-                window = img_window
+            # Get target window and resize
+            window = full_window if view_panel.full_btn else img_window
             display_img = cv2.resize(sensor_img, tuple(window.GetSize()))
             # Process resized image
             for process in img_processes['resized']:
                 display_img = process(display_img)
-            # Send to wx as RGB
+            # Send to window as RGB
             window.Refresh()
             display_put(to_rgb(display_img))
             view_panel.frames += 1
