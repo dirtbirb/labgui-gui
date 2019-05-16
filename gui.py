@@ -806,7 +806,7 @@ class TextCtrlPanel(GuiPanel):
     ''' Provides build_settings as a helper method to create control panels
         from a list of settings. '''
 
-    def build_textctrls(self, textctrls, start=(0, 0), length=0):
+    def build_textctrls(self, textctrls, start=(0, 0), length=5):
         ''' Build column of functional TextCtrls from a list of parameters.
             textctrls: List of parameter tuples for which to build controls:
                 (label, units, function)
