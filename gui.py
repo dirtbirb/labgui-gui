@@ -34,6 +34,10 @@ SP3 = wx.GBSpan(1, 3)
 ALIGN_CENTER_RIGHT = wx.ALIGN_RIGHT | wx.ALIGN_CENTER_VERTICAL
 CLR_BG = wx.Colour(0, 0, 0).MakeDisabled()
 
+# misc
+RED_PX = np.uint8((0, 0, 255))
+GREEN_PX = np.uint8((0, 255, 0))
+
 
 # Helper functions ------------------------------------------------------------
 
@@ -85,29 +89,18 @@ def to_float(value):
 
 def to_rgb(img):
     ''' Convert grayscale or BGR (OpenCV default) to RGB (wx default) '''
-    if is_color(img):       # from BGR (assumed)
-        cvt_method = cv2.COLOR_BGR2RGB
-    else:                   # from grayscale
-        cvt_method = cv2.COLOR_GRAY2RGB
-    return cv2.cvtColor(img, cvt_method)
+    return cv2.cvtColor(
+        img, cv2.COLOR_BGR2RGB if is_color(img) else cv2.COLOR_GRAY2RGB)
 
 
 def top_px(img, n=1):
     ''' Return top nth pixel from an image '''
-    if n == 1:
-        ret = img.max()
-    else:
-        ret = np.partition(img.flatten(), -n)[-n]
-    return ret
+    return img.max() if n == 1 else np.partition(img.flatten(), -n)[-n]
 
 
 def top_px_avg(img, n=3):
     ''' Return average of top n pixels from an image '''
-    if n == 1:
-        ret = img.max()
-    else:
-        ret = np.partition(img.flatten(), -n)[-n:].mean()
-    return ret
+    return img.max() if n == 1 else np.partition(img.flatten(), -n)[-n:].mean()
 
 
 # Devices ---------------------------------------------------------------------
@@ -235,10 +228,7 @@ class TestSensor(GuiSensor):
 
 def FileDialog(msg, ext=None, save=False):
     ''' Show file save/open dialog with optional extension filter '''
-    if save:
-        style = wx.FD_SAVE
-    else:
-        style = wx.FD_OPEN
+    style = wx.FD_SAVE if save else wx.FD_OPEN
     dlg = wx.FileDialog(None, msg, wildcard='*'+ext, style=style)
     if dlg.ShowModal() == wx.ID_OK:     # If clicked "Save" or "Open"
         fn = dlg.GetPath()
@@ -875,7 +865,6 @@ class CapturePanel(TextCtrlPanel):
 class ColorPanel(GuiPanel):
     ''' Color processing '''
 
-    RED = np.uint8((0, 0, 255))
     RNG8 = np.arange(0, 256)    # Pixel values for range_img
 
     def __init__(self, *args, name='Color', **kwargs):
@@ -996,8 +985,9 @@ class ColorPanel(GuiPanel):
                 mx = img[~self.sat_map].max()       # Ignore saturated pixels
             else:
                 mx = img.max()
-            img = cv2.LUT(
-                img, (self.RNG8 * self.range_val / mx).astype(np.uint8))
+            if mx:
+                img = cv2.LUT(
+                    img, (self.RNG8 * self.range_val / mx).astype(np.uint8))
         return img
 
     def gamma_img(self, img):
@@ -1019,7 +1009,7 @@ class ColorPanel(GuiPanel):
         if self.is_sat():
             if not is_color(img):
                 img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-            img[self.sat_map] = self.RED
+            img[self.sat_map] = RED_PX
         return img
 
     def process_img(self, img):
@@ -1101,6 +1091,55 @@ class FlatFieldPanel(GuiPanel):
         return self.flatfield_img(img)
 
 
+class FringePanel(GuiPanel):
+    ''' Controls related to interference fringes '''
+
+    def __init__(self, *args, name='Fringes', **kwargs):
+        super().__init__(*args, name=name, **kwargs)
+        self.GetParent().img_processes['resized'].append(self.process_img)
+
+    def MakeLayout(self):
+        count = TextCtrl(self, size=SZ1, length=4, style=wx.TE_PROCESS_ENTER)
+        apply = wx.ToggleButton(self, label='Apply', size=SZ1)
+
+        count.Bind(wx.EVT_TEXT_ENTER, self.validate)
+        apply.Bind(wx.EVT_TOGGLEBUTTON, self.validate)
+
+        self.count = count
+        self.apply = apply
+        self.controls.extend([count, apply])
+
+        layout = [
+            GuiItem(self.MakeLabel(), (0, 0), SP2),
+            GuiItem(count, (1, 0)),
+            GuiItem(apply, (1, 1))]
+        return layout
+
+    def validate(self, event=None):
+        ret = True
+        if not isinstance(self.count, float):
+            self.reset()
+            ret = False
+        return ret
+
+    def lines_img(self, img):
+        if self.apply:
+            count = self.count
+            if isinstance(count, float):
+                h, w = img.shape[:2]
+                col_end = int(w/2)
+                d = int(h / (count + 1))
+                row = d
+                px = GREEN_PX if is_color(img) else 255
+                while row < h - 1:
+                    img[row, :col_end] = px
+                    row += d
+        return img
+
+    def process_img(self, img):
+        return self.lines_img(img)
+
+
 class TargetPanel(GuiPanel):
     ''' Target overlay '''
 
@@ -1163,8 +1202,6 @@ class TargetPanel(GuiPanel):
         self.set_size()
 
     def set_size(self, event=None):
-        # TODO: Save/update config
-
         # Validate input
         for v in (self.x, self.y, self.size):
             if isinstance(v, str):
@@ -1172,14 +1209,11 @@ class TargetPanel(GuiPanel):
                 return
 
         # Update size in pixels
-        if self.x < 1:
-            self.px_x = int(self.img_size[0] * self.x)
-        else:
-            self.px_x = int(self.x)
-        if self.y < 1:
-            self.px_y = int(self.img_size[1] * self.y)
-        else:
-            self.px_y = int(self.y)
+        w, h = self.img_size
+        x = self.x
+        self.px_x = int(w * x) if x < 1 else int(x)
+        y = self.y
+        self.px_y = int(h * y) if y < 1 else int(y)
 
     def target_dc(self, dc):
         self.img_size = dc.Size
@@ -1198,14 +1232,8 @@ class TargetPanel(GuiPanel):
 
             # Convert sizes to pixels appropriate to given DC
             # TODO: do this for raw pixel entries too
-            if x < 1:
-                x_c = self.img_size[0] * x
-            else:
-                x_c = x
-            if y < 1:
-                y_c = self.img_size[1] * y
-            else:
-                y_c = y
+            x_c = self.img_size[0] * x if x < 1 else x
+            y_c = self.img_size[1] * y if y < 1 else y
             r = self.size
 
             # Draw target
@@ -1218,7 +1246,7 @@ class TargetPanel(GuiPanel):
             elif target == 2:
                 r2 = 2 * r
                 dc.DrawRectangle(x_c-r, y_c-r, r2, r2)
-            elif target == 3:
+            else:   # target == 3:
                 dc.DrawCircle(x_c, y_c, r)
 
     def process_dc(self, dc):
