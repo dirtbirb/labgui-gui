@@ -1034,9 +1034,10 @@ class FlatFieldPanel(GuiPanel):
         self.GetParent().img_processes['full'].append(self.process_img)
 
     def MakeLayout(self):
+        SZ_FF = wx.Size(2.5*PX_PAD, PX_PAD)
         thumb = ImageWindow(self, size=SZ_THUMB)
-        save = wx.Button(self, label='Update', size=SZ2)
-        apply = wx.ToggleButton(self, label='Apply', size=SZ2)
+        save = wx.Button(self, label='Save', size=SZ_FF)
+        apply = wx.ToggleButton(self, label='Apply', size=SZ_FF)
 
         save.Bind(wx.EVT_BUTTON, self.save)
         apply.Bind(wx.EVT_TOGGLEBUTTON, self.validate)
