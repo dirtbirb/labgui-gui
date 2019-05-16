@@ -807,8 +807,8 @@ class TextCtrlPanel(GuiPanel):
         from a list of settings. '''
 
     def __init__(self, *args, ctrl_sz=SZ1, **kwargs):
-        super().__init__(*args, **kwargs)
         self.ctrl_sz = ctrl_sz
+        super().__init__(*args, **kwargs)
 
     def build_textctrls(self, textctrls, start=(0, 0), length=5):
         ''' Build column of functional TextCtrls from a list of parameters.
