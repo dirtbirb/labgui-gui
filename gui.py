@@ -824,7 +824,7 @@ class TextCtrlPanel(GuiPanel):
             # Create GUI layout
             label = wx.StaticText(self, label=param)
             field = TextCtrl(
-                self, size=SZ2, value='', length=length,
+                self, size=SZ1, value='', length=length,
                 style=wx.TE_PROCESS_ENTER)
             field.SetMaxLength(length)
             units = wx.StaticText(self, label=units)
