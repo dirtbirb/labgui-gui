@@ -614,6 +614,7 @@ class ViewPanel(GuiPanel):
             layout['bottom'].insert(i+1, new_panel)
         # Reassemble GUI
         parent.Assemble()
+        self.update()
 
     def set_source(self, i=0):
         self.GetObject('source').SetSelection(i)
@@ -865,7 +866,7 @@ class CapturePanel(TextCtrlPanel):
             ('Framerate', 'fps', self.device.fps)]
         layout = [
             GuiItem(self.MakeLabel(), (0, 0), SP3),
-            *self.build_textctrls(textctrls, (1, 0))]
+            *self.build_textctrls(textctrls, (1, 0), 6)]
         return layout
 
 
