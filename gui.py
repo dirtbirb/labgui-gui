@@ -806,7 +806,9 @@ class TextCtrlPanel(GuiPanel):
     ''' Provides build_settings as a helper method to create control panels
         from a list of settings. '''
 
-    SZ_TEXTCTRL = SZ1
+    def __init__(self, *args, ctrl_sz=SZ1, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.ctrl_sz = ctrl_sz
 
     def build_textctrls(self, textctrls, start=(0, 0), length=5):
         ''' Build column of functional TextCtrls from a list of parameters.
@@ -826,7 +828,7 @@ class TextCtrlPanel(GuiPanel):
             # Create GUI layout
             label = wx.StaticText(self, label=param)
             field = TextCtrl(
-                self, size=self.SZ_TEXTCTRL, value='', length=length,
+                self, size=self.ctrl_sz, value='', length=length,
                 style=wx.TE_PROCESS_ENTER)
             field.SetMaxLength(length)
             units = wx.StaticText(self, label=units)
