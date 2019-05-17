@@ -752,24 +752,24 @@ class RoiPanel(GuiPanel):
         y_lbl = wx.StaticText(self, label='y')
         y = TextCtrl(self, size=SZ1, length=6, style=wx.TE_PROCESS_ENTER)
         h = TextCtrl(self, size=SZ1, length=6, style=wx.TE_PROCESS_ENTER)
-        apply = wx.Button(self, label='Set', size=SZ1)
+        reset = wx.Button(self, label='Reset', size=SZ1)
         load = wx.Button(self, label='Load', size=SZ1)
 
         x.Bind(wx.EVT_TEXT_ENTER, self.set_roi)
         y.Bind(wx.EVT_TEXT_ENTER, self.set_roi)
         w.Bind(wx.EVT_TEXT_ENTER, self.set_roi)
         h.Bind(wx.EVT_TEXT_ENTER, self.set_roi)
-        apply.Bind(wx.EVT_BUTTON, self.set_roi)
+        reset.Bind(wx.EVT_BUTTON, self.reset)
         # load.Bind(wx.EVT_BUTTON, self.set_roi)    # TODO: save/load state
         load.Disable()
 
-        self.apply = apply
+        self.reset = reset
         self.load = load
         self.x = x
         self.w = w
         self.y = y
         self.h = h
-        self.controls.extend([apply, load, x, w, y, h])
+        self.controls.extend([reset, load, x, w, y, h])
         self.reset()
 
         layout = [
@@ -782,14 +782,14 @@ class RoiPanel(GuiPanel):
             GuiItem(y_lbl, (3, 0), flag=ALIGN_CENTER_RIGHT),
             GuiItem(y, (3, 1)),
             GuiItem(h, (3, 2)),
-            GuiItem(apply, (4, 1)),
+            GuiItem(reset, (4, 1)),
             GuiItem(load, (4, 2))]
         return layout
 
     def reset(self, event=None):
         self.x = self.y = 0.0
         self.w = self.h = 1.0
-        self.apply = False
+        self.set_roi()
 
     def set_roi(self, event=None):
         if not self.validate() or not self.device or not self.device.running:
