@@ -752,24 +752,24 @@ class RoiPanel(GuiPanel):
         y_lbl = wx.StaticText(self, label='y')
         y = TextCtrl(self, size=SZ1, length=6, style=wx.TE_PROCESS_ENTER)
         h = TextCtrl(self, size=SZ1, length=6, style=wx.TE_PROCESS_ENTER)
-        reset = wx.Button(self, label='Reset', size=SZ1)
-        load = wx.Button(self, label='Load', size=SZ1)
+        reset_btn = wx.Button(self, label='Reset', size=SZ1)
+        load_btn = wx.Button(self, label='Load', size=SZ1)
 
         x.Bind(wx.EVT_TEXT_ENTER, self.set_roi)
         y.Bind(wx.EVT_TEXT_ENTER, self.set_roi)
         w.Bind(wx.EVT_TEXT_ENTER, self.set_roi)
         h.Bind(wx.EVT_TEXT_ENTER, self.set_roi)
-        reset.Bind(wx.EVT_BUTTON, self.reset)
-        # load.Bind(wx.EVT_BUTTON, self.set_roi)    # TODO: save/load state
-        load.Disable()
+        reset_btn.Bind(wx.EVT_BUTTON, self.reset)
+        # load_btn.Bind(wx.EVT_BUTTON, self.set_roi)    # TODO: save/load state
+        load_btn.Disable()
 
-        self.reset = reset
-        self.load = load
+        self.reset_btn = reset_btn
+        self.load_btn = load_btn
         self.x = x
         self.w = w
         self.y = y
         self.h = h
-        self.controls.extend([reset, load, x, w, y, h])
+        self.controls.extend([reset_btn, load_btn, x, w, y, h])
         self.reset()
 
         layout = [
@@ -782,14 +782,12 @@ class RoiPanel(GuiPanel):
             GuiItem(y_lbl, (3, 0), flag=ALIGN_CENTER_RIGHT),
             GuiItem(y, (3, 1)),
             GuiItem(h, (3, 2)),
-            GuiItem(reset, (4, 1)),
-            GuiItem(load, (4, 2))]
+            GuiItem(reset_btn, (4, 1)),
+            GuiItem(load_btn, (4, 2))]
         return layout
 
-    def reset(self, event=None):
-        self.x = self.y = 0.0
-        self.w = self.h = 1.0
-        self.set_roi()
+    def get_roi(self, event=None):
+        self.x, self.y, self.w, self.h = self.device.roi(None)
 
     def set_roi(self, event=None):
         if not self.validate() or not self.device or not self.device.running:
@@ -797,10 +795,13 @@ class RoiPanel(GuiPanel):
         self.x, self.y, self.w, self.h = self.device.roi(
             (self.x, self.y, self.w, self.h))
 
+    def reset(self, event=None):
+        self.x = self.y = 0.0
+        self.w = self.h = 1.0
+        self.set_roi()
+
     def update(self, event=None):
-        apply = self.apply
-        self.reset()
-        self.apply = apply
+        self.get_roi()
 
     def validate(self, event=None):
         ret = True
