@@ -787,7 +787,11 @@ class RoiPanel(GuiPanel):
         return layout
 
     def get_roi(self, event=None):
-        self.x, self.y, self.w, self.h = self.device.roi(None)
+        roi = self.device.roi(None)
+        if roi:
+            self.x, self.y, self.w, self.h = roi
+        else:
+            self.reset()
 
     def set_roi(self, event=None):
         if not self.validate() or not self.device or not self.device.running:
