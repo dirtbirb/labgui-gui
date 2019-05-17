@@ -8,12 +8,15 @@ import wx
 
 # Constants -------------------------------------------------------------------
 
-# Basic
+# Colored pixels
+BLUE_PX = np.uint8((255, 0, 0))         # BGR format for OpenCV / NumPy
+GREEN_PX = np.uint8((0, 255, 0))
+RED_PX = np.uint8((0, 0, 255))
+
+# wx.Size
 PX_PAD = 25
 PX_PAD_INNER = 3
 PX_PAD_OUTER = 10
-
-# wx.Size
 SZ_IMAGE = wx.Size(1280, 800)           # (W, H); opposite of NumPy
 SZ_THUMB = wx.Size(128, 80)
 SZ_BTN = wx.Size(2*PX_PAD, 2*PX_PAD)
@@ -34,10 +37,6 @@ SP3 = wx.GBSpan(1, 3)
 ALIGN_CENTER_RIGHT = wx.ALIGN_RIGHT | wx.ALIGN_CENTER_VERTICAL
 CLR_BG = wx.Colour(0, 0, 0).MakeDisabled()
 
-# misc
-RED_PX = np.uint8((0, 0, 255))
-GREEN_PX = np.uint8((0, 255, 0))
-
 
 # Helper functions ------------------------------------------------------------
 
@@ -52,7 +51,7 @@ def is_color(img):
 
 
 def make_binding(obj, func):
-    ''' Set parameter if given, update GUI with returned value '''
+    ''' Set parameter if given a value, update GUI with returned value '''
 
     def textctrl_binding(event):
         val = to_float(obj.GetValue())
@@ -74,7 +73,8 @@ def make_binding(obj, func):
     elif isinstance(obj, wx.ItemContainerImmutable):
         binding = item_container_binding
     else:
-        raise TypeError("Can't make binding for {}".format(type(obj)))
+        raise NotImplementedError(
+            "Binding not implemented for {}".format(type(obj)))
     return binding
 
 
@@ -151,8 +151,7 @@ class HybridDevice(GuiDevice):
             running &= device.start()
         if not running:
             self.close()
-        else:
-            self.running = running
+        return running
 
     def close(self):
         for device in self.devices:
@@ -161,37 +160,42 @@ class HybridDevice(GuiDevice):
 
 
 class GuiSensor(GuiDevice):
+    ''' GuiDevice that accepts an image queue '''
+
     def __init__(self, img_queue, panels={}):
         self.img_queue = img_queue
         super().__init__(panels)
 
 
 class TestSensor(GuiSensor):
-    ''' Test device, fills img_queue with random image data '''
+    ''' Test sensor, fills img_queue with random uint8 data '''
 
-    TIMEOUT = 1
-
-    def __init__(self, img_queue):
+    def __init__(self, img_queue, timeout=1):
         super().__init__(img_queue)
+        self.timeout = timeout
         self.img_thread = None
         self.start()
 
-    def start(self):
-        def img_loop():
-            while self.running:
-                try:
-                    self.img_queue.put(test_image(), timeout=self.TIMEOUT)
-                except queue.Full:
-                    pass
+    def __img_loop(self):
+        put_image = self.img_queue.put
+        while self.running:
+            try:
+                put_image(test_image(), timeout=self.timeout)
+            except queue.Full:
+                pass
 
+    def start(self):
         self.running = True
-        self.img_thread = threading.Thread(target=img_loop)
+        self.img_thread = threading.Thread(target=self.__img_loop)
         self.img_thread.daemon = True
         self.img_thread.start()
+        return self.running
 
     def close(self):
         self.running = False
-        self.img_thread = None
+        if self.img_thread:
+            self.img_thread.join()
+            self.img_thread = None
 
 
 # wx.Dialog -------------------------------------------------------------------
@@ -462,6 +466,8 @@ class ViewPanel(GuiPanel):
         self.Bind(wx.EVT_SET_FOCUS, self.OnFocus)   # HACK: doesn't work?
         # Save video
         self.video_writer = None    # cv2.VideoWriter
+        self.fn = None
+        self.fn_i = 0
         parent.img_processes['full'].append(self.save_frame)
         # FPS (frames per second) counter
         self.fps_time = fps_time
@@ -629,13 +635,18 @@ class ViewPanel(GuiPanel):
             img = parent.image.copy()
             fn = FileDialog('Save image', '.png', save=True)
             if fn:
-                cv2.imwrite(fn, img, (cv2.IMWRITE_PNG_COMPRESSION, 5))
+                cv2.imwrite(fn, img, (cv2.IMWRITE_PNG_COMPRESSION, 0))
 
     def save_frame(self, img):
-        if self.video_writer:
-            if not is_color(img):
-                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-            self.video_writer.write(img)
+        # HACK: save series of images instead of avi
+        # if self.video_writer:
+        #     if not is_color(img):
+        #         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        #     self.video_writer.write(img)
+        if self.save_vid_btn and self.fn:
+            fn = self.fn + str(self.fn_i) + '.png'
+            cv2.imwrite(fn, img, (cv2.IMWRITE_PNG_COMPRESSION, 0))
+            self.fn_i += 1
         return img
 
     def save_vid(self, event=None):
@@ -644,12 +655,16 @@ class ViewPanel(GuiPanel):
         flag = parent.img_show
         flag.clear()            # Pause capture
         if self.play_btn and self.save_vid_btn:
-            fn = FileDialog('Save video', '.avi', save=True)
+            # HACK: save series of images instead of avi
+            # fn = FileDialog('Save video', '.avi', save=True)
+            fn = FileDialog('Save video', '.png', save=True)
             if fn:                  # Start recording
-                codec = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
-                fps = 10
-                shape = parent.image.shape[:2][::-1]
-                self.video_writer = cv2.VideoWriter(fn, codec, fps, shape)
+                self.fn = fn[:fn.rfind('/') + 1]
+                self.fn_i = 1
+                # codec = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
+                # fps = 10
+                # shape = parent.image.shape[:2][::-1]
+                # self.video_writer = cv2.VideoWriter(fn, codec, fps, shape)
             else:                   # Cancel recording
                 self.save_vid_btn = False
         else:                   # Finish recording
@@ -729,8 +744,8 @@ class RoiPanel(GuiPanel):
         super().__init__(*args, name=name, **kwargs)
 
     def MakeLayout(self):
-        offset_lbl = wx.StaticText(self, label='Offset')
-        size_lbl = wx.StaticText(self, label='Size')
+        start_lbl = wx.StaticText(self, label='Start')
+        end_lbl = wx.StaticText(self, label='End')
         x_lbl = wx.StaticText(self, label='x')
         x = TextCtrl(self, size=SZ1, length=6, style=wx.TE_PROCESS_ENTER)
         w = TextCtrl(self, size=SZ1, length=6, style=wx.TE_PROCESS_ENTER)
@@ -745,7 +760,7 @@ class RoiPanel(GuiPanel):
         w.Bind(wx.EVT_TEXT_ENTER, self.set_roi)
         h.Bind(wx.EVT_TEXT_ENTER, self.set_roi)
         apply.Bind(wx.EVT_BUTTON, self.set_roi)
-        # load.Bind(wx.EVT_BUTTON, self.set_roi)
+        # load.Bind(wx.EVT_BUTTON, self.set_roi)    # TODO: save/load state
         load.Disable()
 
         self.apply = apply
@@ -759,8 +774,8 @@ class RoiPanel(GuiPanel):
 
         layout = [
             GuiItem(self.MakeLabel(), (0, 0), SP3),
-            GuiItem(offset_lbl, (1, 1), flag=wx.ALIGN_CENTER_HORIZONTAL),
-            GuiItem(size_lbl, (1, 2), flag=wx.ALIGN_CENTER_HORIZONTAL),
+            GuiItem(start_lbl, (1, 1), flag=wx.ALIGN_CENTER_HORIZONTAL),
+            GuiItem(end_lbl, (1, 2), flag=wx.ALIGN_CENTER_HORIZONTAL),
             GuiItem(x_lbl, (2, 0), flag=ALIGN_CENTER_RIGHT),
             GuiItem(x, (2, 1)),
             GuiItem(w, (2, 2)),
@@ -1223,24 +1238,21 @@ class TargetPanel(GuiPanel):
     def target_dc(self, dc):
         self.img_size = dc.Size
         target = self.target
-        if self.target:
+        if target:
             # Set brushes
             dc.SetPen(self.target_pen)
             dc.SetBrush(self.target_brush)
-
             # Validate input
             try:
                 x, y = float(self.x), float(self.y)
             except ValueError:
                 self.reset()
                 return
-
             # Convert sizes to pixels appropriate to given DC
             # TODO: do this for raw pixel entries too
             x_c = self.img_size[0] * x if x < 1 else x
             y_c = self.img_size[1] * y if y < 1 else y
             r = self.size
-
             # Draw target
             if target == 1:
                 dc.DrawLineList((
@@ -1337,7 +1349,6 @@ class GuiFrame(wx.Frame):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
         # Image control
         self.frames = 0
         self.img_show = threading.Event()
@@ -1347,7 +1358,6 @@ class GuiFrame(wx.Frame):
             'resized': [],
             'dc': []}
         self.display_queue = queue.Queue(1)
-
         # GUI elements
         self.image = np.zeros(SZ_IMAGE, dtype=np.uint8)
         self.img_window = VideoWindow(
@@ -1359,7 +1369,6 @@ class GuiFrame(wx.Frame):
             'left': [],
             'right': [self.img_window],
             'bottom': [self.view_panel]}
-
         # Start display thread
         self.img_thread = threading.Thread(target=self.__display_loop)
         self.img_thread.daemon = True
@@ -1367,7 +1376,6 @@ class GuiFrame(wx.Frame):
 
     def __display_loop(self):
         ''' Run method for image display thread '''
-
         # Caching (avoids extra lookups, probably useless)
         display_put = self.display_queue.put
         img_window = self.img_window
@@ -1376,7 +1384,6 @@ class GuiFrame(wx.Frame):
         wait = self.img_show.wait
         view_panel = self.view_panel
         full_window = view_panel.full_frame.img_window
-
         while True:
             # Get image once available
             # BUG: self.image = img_get() occasionally freezes at high fps
@@ -1426,11 +1433,10 @@ class GuiFrame(wx.Frame):
         layout['right'].append(bot_szr)
         right_szr = construct_panel(wx.VERTICAL, layout['right'], PX_PAD_OUTER)
         layout['right'].pop()   # allow bot_szr to be deleted on Assemble()
-
         # Assemble GUI
         gui_sizer.AddSpacer(PX_PAD_OUTER)
         add_module(gui_sizer, left_szr, PX_PAD_OUTER)
         add_module(gui_sizer, right_szr, PX_PAD_OUTER)
         self.SetSizerAndFit(gui_sizer, deleteOld=True)
-        self.Layout()   # HACK: Sometimes doesn't trigger in SetSizerAndFit?
+        self.Layout()   # Sometimes doesn't trigger in SetSizerAndFit?
         self.Show()
