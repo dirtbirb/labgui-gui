@@ -787,10 +787,8 @@ class RoiPanel(GuiPanel):
         return layout
 
     def reset(self, event=None):
-        self.x = 0.0
-        self.y = 0.0
-        self.w = 1.0
-        self.h = 1.0
+        self.x = self.y = 0.0
+        self.w = self.h = 1.0
         self.apply = False
 
     def set_roi(self, event=None):
@@ -806,11 +804,12 @@ class RoiPanel(GuiPanel):
 
     def validate(self, event=None):
         ret = True
+        x, y = self.x, self.y
         try:
-            self.x = np.clip(self.x, 0, 1)
-            self.y = np.clip(self.y, 0, 1)
-            self.w = np.clip(self.w, self.x, 1)
-            self.h = np.clip(self.h, self.y, 1)
+            self.x = np.clip(x, 0, 1)
+            self.y = np.clip(y, 0, 1)
+            self.w = np.clip(self.w, x, 1)
+            self.h = np.clip(self.h, y, 1)
         except (ValueError, TypeError):
             self.reset()
             ret = False
@@ -821,11 +820,7 @@ class TextCtrlPanel(GuiPanel):
     ''' Provides build_settings as a helper method to create control panels
         from a list of settings. '''
 
-    def __init__(self, *args, ctrl_sz=SZ1, **kwargs):
-        self.ctrl_sz = ctrl_sz
-        super().__init__(*args, **kwargs)
-
-    def build_textctrls(self, textctrls, start=(0, 0), length=5):
+    def build_textctrls(self, textctrls, start=(0, 0), size=SZ1, length=5):
         ''' Build column of functional TextCtrls from a list of parameters.
             textctrls: List of parameter tuples for which to build controls:
                 (label, units, function)
@@ -843,7 +838,7 @@ class TextCtrlPanel(GuiPanel):
             # Create GUI layout
             label = wx.StaticText(self, label=param)
             field = TextCtrl(
-                self, size=self.ctrl_sz, value='', length=length,
+                self, size=size, value='', length=length,
                 style=wx.TE_PROCESS_ENTER)
             field.SetMaxLength(length)
             units = wx.StaticText(self, label=units)
@@ -875,7 +870,7 @@ class CapturePanel(TextCtrlPanel):
             ('Framerate', 'fps', self.device.fps)]
         layout = [
             GuiItem(self.MakeLabel(), (0, 0), SP3),
-            *self.build_textctrls(textctrls, (1, 0), 6)]
+            *self.build_textctrls(textctrls, (1, 0), SZ1, 6)]
         return layout
 
 
