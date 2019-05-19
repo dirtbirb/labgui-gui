@@ -1,4 +1,5 @@
 import cv2
+import dbus
 import numpy as np
 import queue
 import threading
@@ -619,7 +620,7 @@ class ViewPanel(GuiPanel):
     # Manage display -------------------------------
     def fullscreen(self, event=None):
         ''' Show/hide fullscreen frame '''
-        self.full_frame.Show(self.full_btn)
+        self.full_frame.ShowFullScreen(self.full_btn)
 
     def play(self, event=None):
         flag = self.parent.img_show
@@ -1329,8 +1330,15 @@ class FullscreenFrame(wx.Frame):
 
     def __init__(self, parent, img_queue, dc_processes=[], style=0, **kwargs):
         super().__init__(parent, style=style, **kwargs)
+        # Image display
         self.img_window = VideoWindow(self, img_queue, dc_processes)
         self.img_window.Bind(wx.EVT_KEY_DOWN, self.OnKey)
+        # Screensaver suppression
+        ssaver = dbus.SessionBus().get_object(
+            'org.freedesktop.ScreenSaver', '/ScreenSaver')
+        self.ssaver_interface = dbus.Interface(
+            ssaver, dbus_interface='org.freedesktop.ScreenSaver')
+        self.ssaver_cookie = None
 
     def OnKey(self, event):
         ''' Exit fullscreen on ESC and inform parent frame '''
@@ -1338,10 +1346,16 @@ class FullscreenFrame(wx.Frame):
             self.GetParent().full_btn = False   # HACK: EVT_SET_FOCUS broken?
             self.Hide()
 
-    def Show(self, show=True):
+    def ShowFullScreen(self, show=True):
+        ''' Show in fullscreen mode and disable screensaver, or the reverse '''
         if show:
             self.Maximize()
-        super().Show(show)
+            self.ssaver_cookie = self.ssaver_interface.Inhibit(
+                "myapps", "PUFFER fullscreen")
+        elif self.ssaver_cookie:
+            self.ssaver_interface.UnInhibit(self.ssaver_cookie)
+            self.ssaver_cookie = None
+        super().ShowFullScreen(show)
 
 
 class GuiFrame(wx.Frame):
