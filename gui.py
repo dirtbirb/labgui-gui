@@ -1,7 +1,7 @@
 import cv2
-import dbus
 import numpy as np
 import queue
+import subprocess
 import threading
 import time
 import wx
@@ -1333,12 +1333,6 @@ class FullscreenFrame(wx.Frame):
         # Image display
         self.img_window = VideoWindow(self, img_queue, dc_processes)
         self.img_window.Bind(wx.EVT_KEY_DOWN, self.OnKey)
-        # Screensaver suppression
-        ssaver = dbus.SessionBus().get_object(
-            'org.freedesktop.ScreenSaver', '/ScreenSaver')
-        self.ssaver_interface = dbus.Interface(
-            ssaver, dbus_interface='org.freedesktop.ScreenSaver')
-        self.ssaver_cookie = None
 
     def OnKey(self, event):
         ''' Exit fullscreen on ESC and inform parent frame '''
@@ -1350,11 +1344,9 @@ class FullscreenFrame(wx.Frame):
         ''' Show in fullscreen mode and disable screensaver, or the reverse '''
         if show:
             self.Maximize()
-            self.ssaver_cookie = self.ssaver_interface.Inhibit(
-                "myapps", "PUFFER fullscreen")
-        elif self.ssaver_cookie:
-            self.ssaver_interface.UnInhibit(self.ssaver_cookie)
-            self.ssaver_cookie = None
+        subprocess.run(
+            ["gsettings", "set", "org.gnome.desktop.screensaver",
+             "idle-activation-enabled", str(bool(show)).lower()])
         super().ShowFullScreen(show)
 
 
@@ -1400,7 +1392,6 @@ class GuiFrame(wx.Frame):
         full_window = view_panel.full_frame.img_window
         while True:
             # Get image once available
-            # BUG: self.image = img_get() occasionally freezes at high fps
             wait()
             sensor_img = img_get()
             self.image = sensor_img.copy()
