@@ -497,15 +497,18 @@ class ViewPanel(GuiPanel):
         full_btn = wx.ToggleButton(self, label='Full', size=SZ1)
         save_img_btn = wx.Button(self, label='Save', size=SZ1)
         save_vid_btn = wx.ToggleButton(self, label='Record', size=SZ1)
+        sum_img_btn = wx.ToggleButton(self, label='Add', size=SZ1)
+        sum_n = TextCtrl(self, value='0', size=SZ1, style=wx.TE_PROCESS_ENTER)
         fps_lbl = wx.StaticText(self, label='FPS ')
         fps = wx.StaticText(self, label='-', size=WD1)
 
         # Bind elements to functions
+        source.Bind(wx.EVT_CHOICE, self.select_source)
         play_btn.Bind(wx.EVT_TOGGLEBUTTON, self.play)
         full_btn.Bind(wx.EVT_TOGGLEBUTTON, self.fullscreen)
         save_img_btn.Bind(wx.EVT_BUTTON, self.save_img)
         save_vid_btn.Bind(wx.EVT_TOGGLEBUTTON, self.save_vid)
-        source.Bind(wx.EVT_CHOICE, self.select_source)
+        sum_n.Bind(wx.EVT_TEXT_ENTER, self.sum_img)
 
         # Expose elements as attributes
         self.source = source
@@ -513,18 +516,22 @@ class ViewPanel(GuiPanel):
         self.full_btn = full_btn
         self.save_img_btn = save_img_btn
         self.save_vid_btn = save_vid_btn
+        self.sum_img_btn = sum_img_btn
+        self.sum_n = sum_n
         self.fps = fps
 
         # Return layout for assembly
         layout = [
             GuiItem(self.MakeLabel(), (0, 0), SP2),
             GuiItem(source, (1, 0), SP2, wx.EXPAND),
-            GuiItem(play_btn, (2, 0), flag=wx.EXPAND),
-            GuiItem(full_btn, (2, 1), flag=wx.EXPAND),
-            GuiItem(save_img_btn, (3, 0), flag=wx.EXPAND),
-            GuiItem(save_vid_btn, (3, 1), flag=wx.EXPAND),
-            GuiItem(fps_lbl, (4, 0), flag=ALIGN_CENTER_RIGHT),
-            GuiItem(fps, (4, 1))]
+            GuiItem(play_btn, (2, 0)),
+            GuiItem(full_btn, (2, 1)),
+            GuiItem(save_img_btn, (3, 0)),
+            GuiItem(save_vid_btn, (3, 1)),
+            GuiItem(sum_img_btn, (4, 0)),
+            GuiItem(sum_n, (4, 1)),
+            GuiItem(fps_lbl, (5, 0), flag=ALIGN_CENTER_RIGHT),
+            GuiItem(fps, (5, 1))]
         return layout
 
     def OnClose(self, event):
@@ -548,12 +555,23 @@ class ViewPanel(GuiPanel):
         if self.save_vid_btn:
             self.save_vid_btn = False
             self.save_vid()
+        self.sum_img_btn = False
+        self.sum_n = 0
         for panel in self.device_panels:
             panel.reset()
 
     def update(self, event=None):
         for panel in self.device_panels:
             panel.update()
+
+    def validate(self, event=None):
+        ret = True
+        if not isinstance(self.sum_n, float):
+            self.reset()
+            ret = False
+        else:
+            self.sum_n = int(self.sum_n)
+        return ret
 
     # Manage sources -------------------------------
     def add_source(self, name, obj, set_source=False):
@@ -620,6 +638,12 @@ class ViewPanel(GuiPanel):
         self.select_source()
 
     # Manage display -------------------------------
+    def sum_img(self, event=None):
+        valid = self.validate()
+        self.sum_img_btn = valid
+        if valid:
+            self.parent.sum_n = int(self.sum_n)
+
     def fullscreen(self, event=None):
         ''' Show/hide fullscreen frame '''
         self.full_frame.ShowFullScreen(self.full_btn)
@@ -1363,6 +1387,7 @@ class GuiFrame(wx.Frame):
         super().__init__(*args, **kwargs)
         # Image control
         self.frames = 0
+        self.sum_n = 0
         self.img_show = threading.Event()
         self.img_queue = queue.Queue(1)
         self.img_processes = {
@@ -1400,6 +1425,30 @@ class GuiFrame(wx.Frame):
             # Get image once available
             wait()
             sensor_img = img_get()
+            # Add images together if requested
+            if view_panel.sum_img_btn:
+                # Add images as float64 while shape and dtype match
+                old_dtype = sensor_img.dtype
+                sensor_img = sensor_img.astype(np.float64)
+                for i in range(self.sum_n):
+                    new_img = img_get()
+                    if new_img.shape != sensor_img.shape or \
+                       new_img.dtype != old_dtype:
+                        break
+                    sensor_img += new_img.astype(np.float64)
+                # If original was 8-bit:
+                # - scale up to 65535 if max > 255, return as 16-bit
+                # - do nothing if max <= 255, return as 8-bit
+                # If original was 16-bit:
+                # - scale down to 65535 if max > 65535
+                new_dtype = np.uint16
+                mx = sensor_img.max()
+                if mx > 65535 or (old_dtype == np.uint8 and mx > 255):
+                    sensor_img *= 65535 / mx
+                elif old_dtype == np.uint8:
+                    new_dtype = np.uint8
+                sensor_img = sensor_img.astype(new_dtype)
+            # Save a copy for other functions to access
             self.image = sensor_img.copy()
             # Process full-frame image
             for process in img_processes['full']:
