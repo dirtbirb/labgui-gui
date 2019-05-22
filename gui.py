@@ -118,8 +118,10 @@ class GuiDevice(object):
     def __init__(self, panels={}):
         super().__init__()
         self.panels = panels
-        self.available = True
-        self.running = False
+        if not hasattr(self, 'available'):
+            self.available = True
+        if not hasattr(self, 'running'):
+            self.running = False
 
     def make_panel(self, parent, panel_name):
         return self.panels[panel_name](parent, self)
@@ -876,7 +878,7 @@ class CapturePanel(TextCtrlPanel):
             ('Framerate', 'fps', self.device.fps)]
         layout = [
             GuiItem(self.MakeLabel(), (0, 0), SP3),
-            *self.build_textctrls(textctrls, (1, 0), SZ1, 6)]
+            *self.build_textctrls(textctrls, (1, 0), SZ2, 10)]
         return layout
 
 
