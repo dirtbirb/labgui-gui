@@ -1136,7 +1136,6 @@ class FringePanel(GuiPanel):
         return layout
 
     def start(self, event=None):
-        print("start")
         self.apply = True
 
     def validate(self, event=None):
@@ -1158,6 +1157,8 @@ class FringePanel(GuiPanel):
                 while row < h - 1:
                     img[row, :col_end] = px
                     row += d
+            else:
+                self.reset()
         return img
 
     def process_img(self, img):
