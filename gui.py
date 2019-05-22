@@ -1125,8 +1125,7 @@ class FringePanel(GuiPanel):
         count = TextCtrl(self, size=SZ1, length=4, style=wx.TE_PROCESS_ENTER)
         apply = wx.ToggleButton(self, label='Apply', size=SZ1)
 
-        count.Bind(wx.EVT_TEXT_ENTER, self.validate)
-        apply.Bind(wx.EVT_TOGGLEBUTTON, self.validate)
+        count.Bind(wx.EVT_TEXT_ENTER, self.start)
 
         self.count = count
         self.apply = apply
@@ -1137,6 +1136,9 @@ class FringePanel(GuiPanel):
             GuiItem(count, (1, 0)),
             GuiItem(apply, (1, 1))]
         return layout
+
+    def start(self, event=None):
+        self.apply = True
 
     def validate(self, event=None):
         ret = True
@@ -1157,6 +1159,8 @@ class FringePanel(GuiPanel):
                 while row < h - 1:
                     img[row, :col_end] = px
                     row += d
+            else:
+                self.reset()
         return img
 
     def process_img(self, img):
