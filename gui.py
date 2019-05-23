@@ -471,13 +471,18 @@ class ViewPanel(GuiPanel):
         self.video_writer = None    # cv2.VideoWriter
         self.fn = None
         self.fn_i = 0
-        parent.img_processes['full'].append(self.save_frame)
+        # Sum images
+        self.sum_dtype = None
+        self.sum_final = None
+        self.sum_frames = []
         # FPS (frames per second) counter
         self.fps_time = fps_time
         self.frames = 0
         fps_thread = threading.Thread(target=self.__fps_loop)
         fps_thread.daemon = True
         fps_thread.start()
+        # Add processes to parent
+        parent.img_processes['full'].extend([self.sum_img, self.save_frame])
 
     def __fps_loop(self):
         ''' Target process for FPS counter thread '''
@@ -498,7 +503,8 @@ class ViewPanel(GuiPanel):
         save_img_btn = wx.Button(self, label='Save', size=SZ1)
         save_vid_btn = wx.ToggleButton(self, label='Record', size=SZ1)
         sum_img_btn = wx.ToggleButton(self, label='Add', size=SZ1)
-        sum_n = TextCtrl(self, value='0', size=SZ1, style=wx.TE_PROCESS_ENTER)
+        sum_n = TextCtrl(
+            self, value='0', size=SZ1, style=wx.TE_PROCESS_ENTER, length=4)
         fps_lbl = wx.StaticText(self, label='FPS ')
         fps = wx.StaticText(self, label='-', size=WD1)
 
@@ -508,7 +514,7 @@ class ViewPanel(GuiPanel):
         full_btn.Bind(wx.EVT_TOGGLEBUTTON, self.fullscreen)
         save_img_btn.Bind(wx.EVT_BUTTON, self.save_img)
         save_vid_btn.Bind(wx.EVT_TOGGLEBUTTON, self.save_vid)
-        sum_n.Bind(wx.EVT_TEXT_ENTER, self.sum_img)
+        sum_n.Bind(wx.EVT_TEXT_ENTER, self.sum_start)
 
         # Expose elements as attributes
         self.source = source
@@ -638,11 +644,52 @@ class ViewPanel(GuiPanel):
         self.select_source()
 
     # Manage display -------------------------------
-    def sum_img(self, event=None):
-        valid = self.validate()
-        self.sum_img_btn = valid
-        if valid:
-            self.parent.sum_n = int(self.sum_n)
+    def sum_start(self, event=None):
+        self.sum_img_button = self.validate()
+
+    def sum_img(self, img):
+        ''' Rolling sum over self.sum_n frames '''
+        if self.sum_img_btn:
+            # Caching, saves a few lookups (probably useless)
+            sum_n = self.sum_n
+            sum_final = self.sum_final
+            sum_dtype = self.sum_dtype
+            sum_frames = self.sum_frames
+            # Reset self.sum_final if format has changed
+            if sum_final is None                \
+               or isinstance(sum_n, str)        \
+               or sum_n < 1                     \
+               or sum_final.shape != img.shape  \
+               or sum_dtype != img.dtype:
+                self.sum_dtype = img.dtype
+                self.sum_final = img.astype(np.float64)
+                self.sum_frames = [img.copy()]
+            else:
+                # Add new image to self.sum_final and self.sum_frames
+                sum_final += img.astype(np.float64)
+                sum_frames.append(img.copy())
+                # Subtract frames if too many
+                while len(sum_frames) > sum_n:
+                    sum_final -= sum_frames.pop(0)
+                # Return as appropriate dtype
+                # If original was 8-bit, try to preserve bit depth:
+                #     - if max > 255, scale up to 65535 and return as 16-bit
+                #     - if max <= 255, don't scale, return as 8-bit
+                # If original was 16-bit, avoid overrun:
+                #     - if max > 65535, scale down to 65535, return as 16-bit
+                new_dtype = np.uint16
+                mx = sum_final.max()
+                if mx > 65535 or (img.dtype == np.uint8 and mx > 255):
+                    f = 65535 / mx
+                    img = sum_final * f
+                elif img.dtype == np.uint8:
+                    new_dtype = np.uint8
+                img = img.astype(new_dtype)
+        else:
+            self.sum_dtype = None
+            self.sum_final = None
+            self.sum_frames = []
+        return img
 
     def fullscreen(self, event=None):
         ''' Show/hide fullscreen frame '''
@@ -1077,7 +1124,8 @@ class FlatFieldPanel(GuiPanel):
     def __init__(self, *args, name='Flat field', **kwargs):
         self.ff = None      # Flat frame
         super().__init__(*args, name=name, **kwargs)
-        self.GetParent().img_processes['full'].append(self.process_img)
+        # Always do flat-frame first!
+        self.GetParent().img_processes['full'].insert(0, self.process_img)
 
     def MakeLayout(self):
         SZ_FF = wx.Size(2.5*PX_PAD, PX_PAD)
@@ -1381,13 +1429,12 @@ class FullscreenFrame(wx.Frame):
 
 
 class GuiFrame(wx.Frame):
-    ''' Simple three-section GUI with image, left sidebar, and bottom bar. '''
+    ''' Simple three-section GUI with image, left sidebar, and bottom bar.
+        Many functions are tightly integrated with ViewPanel. '''
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Image control
-        self.frames = 0
-        self.sum_n = 0
         self.img_show = threading.Event()
         self.img_queue = queue.Queue(1)
         self.img_processes = {
@@ -1425,34 +1472,11 @@ class GuiFrame(wx.Frame):
             # Get image once available
             wait()
             sensor_img = img_get()
-            # Add images together if requested
-            if view_panel.sum_img_btn:
-                # Add images as float64 while shape and dtype match
-                old_dtype = sensor_img.dtype
-                sensor_img = sensor_img.astype(np.float64)
-                for i in range(self.sum_n):
-                    new_img = img_get()
-                    if new_img.shape != sensor_img.shape or \
-                       new_img.dtype != old_dtype:
-                        break
-                    sensor_img += new_img.astype(np.float64)
-                # If original was 8-bit:
-                # - scale up to 65535 if max > 255, return as 16-bit
-                # - do nothing if max <= 255, return as 8-bit
-                # If original was 16-bit:
-                # - scale down to 65535 if max > 65535
-                new_dtype = np.uint16
-                mx = sensor_img.max()
-                if mx > 65535 or (old_dtype == np.uint8 and mx > 255):
-                    sensor_img *= 65535 / mx
-                elif old_dtype == np.uint8:
-                    new_dtype = np.uint8
-                sensor_img = sensor_img.astype(new_dtype)
-            # Save a copy for other functions to access
-            self.image = sensor_img.copy()
             # Process full-frame image
             for process in img_processes['full']:
                 sensor_img = process(sensor_img)
+            # Save a copy for other functions to access
+            self.image = sensor_img.copy()
             # Convert to 8-bit
             if sensor_img.dtype == np.uint16:
                 sensor_img = (sensor_img >> 8).astype(np.uint8)
