@@ -46,6 +46,10 @@ def attrib_name(name):
     return name.lower().replace(' ', '_')
 
 
+def get_dir_name(fn):
+    return fn[:fn.rfind('/') + 1]
+
+
 def is_color(img):
     ''' Return True if image contains a color channel, False otherwise '''
     return len(img.shape) == 3
@@ -231,19 +235,6 @@ class TestSensor(GuiSensor):
 # def InputDialog(title, message, default):
 #     default = default or ""
 #     return showInputDialog(title, message, default, wx.OK + wx.CANCEL)
-
-
-def FileDialog(msg, ext=None, save=False):
-    ''' Show file save/open dialog with optional extension filter '''
-    style = wx.FD_SAVE if save else wx.FD_OPEN
-    dlg = wx.FileDialog(None, msg, wildcard='*'+ext, style=style)
-    if dlg.ShowModal() == wx.ID_OK:     # If clicked "Save" or "Open"
-        fn = dlg.GetPath()
-        if ext and not fn[-4:].lower() == ext.lower():
-            fn += ext
-    else:                               # If clicked "Cancel"
-        fn = False
-    return fn
 
 
 class TextCtrl(wx.TextCtrl):
@@ -467,10 +458,14 @@ class ViewPanel(GuiPanel):
         self.full_frame = FullscreenFrame(
             self, img_queue, parent.img_processes['dc'])
         self.Bind(wx.EVT_SET_FOCUS, self.OnFocus)   # HACK: doesn't work?
+        # Save images
+        self.img_drn = None
         # Save video
-        self.video_writer = None    # cv2.VideoWriter
-        self.fn = None
-        self.fn_i = 0
+        self.vid_drn = None
+        self.vid_frame = 0
+        self.vid_n = 0
+        self.vid_prefix = ''
+        # self.vid_writer = None      # cv2.VideoWriter
         # Sum images
         self.sum_dtype = None
         self.sum_final = None
@@ -617,10 +612,6 @@ class ViewPanel(GuiPanel):
         if self.device:                     # Remove device
             self.device.close()
             self.device = None
-            parent.img_processes = {        # Reset image processes
-                'full': [self.save_frame],
-                'resized': [],
-                'dc': []}
         while not img_queue.empty():        # Purge any queued frames
             img_queue.get(False)
         # Create new device
@@ -704,12 +695,20 @@ class ViewPanel(GuiPanel):
 
     def save_img(self, event=None):
         ''' Save still image via dialog '''
-        parent = self.parent
-        if parent and hasattr(parent, 'image') and parent.image is not None:
-            img = parent.image.copy()
-            fn = FileDialog('Save image', '.png', save=True)
-            if fn:
+        if isinstance(self.parent.image, np.ndarray):
+            img = self.parent.image.copy()
+            ext = '.png'
+            dialog = wx.FileDialog(
+                self, 'Save image', self.img_drn or '', 'image.png', '*'+ext,
+                wx.FD_SAVE)
+            if dialog.ShowModal() == wx.ID_OK:
+                fn = dialog.GetPath()
+                if fn[-4:].lower() != '.png':
+                    fn += '.png'
                 cv2.imwrite(fn, img, (cv2.IMWRITE_PNG_COMPRESSION, 0))
+                self.img_drn = get_dir_name(fn)
+        else:
+            print("Error: No image available.")
 
     def save_frame(self, img):
         # HACK: save series of images instead of avi
@@ -717,36 +716,44 @@ class ViewPanel(GuiPanel):
         #     if not is_color(img):
         #         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         #     self.video_writer.write(img)
-        if self.save_vid_btn and self.fn:
-            fn = self.fn + str(self.fn_i) + '.png'
+        if self.save_vid_btn and self.vid_drn:
+            fn = self.vid_prefix + str(self.vid_frame) + '.png'
             cv2.imwrite(fn, img, (cv2.IMWRITE_PNG_COMPRESSION, 0))
-            self.fn_i += 1
+            self.vid_frame += 1
         return img
 
     def save_vid(self, event=None):
         ''' Start/stop recording, with save dialog '''
-        parent = self.parent
-        flag = parent.img_show
-        flag.clear()            # Pause capture
+        # HACK: save series of images instead of avi
         if self.play_btn and self.save_vid_btn:
-            # HACK: save series of images instead of avi
-            # fn = FileDialog('Save video', '.avi', save=True)
-            fn = FileDialog('Save video', '.png', save=True)
-            if fn:                  # Start recording
-                self.fn = fn[:fn.rfind('/') + 1]
-                self.fn_i = 1
-                # codec = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
-                # fps = 10
-                # shape = parent.image.shape[:2][::-1]
-                # self.video_writer = cv2.VideoWriter(fn, codec, fps, shape)
-            else:                   # Cancel recording
+            flag = self.parent.img_show
+            flag.clear()            # Pause capture
+            dialog = wx.DirDialog(self, 'Save frames', self.vid_drn or '')
+            if dialog.ShowModal() == wx.ID_OK:
+                self.vid_drn = dialog.GetPath()
+                self.vid_frame = 1
+                self.vid_n += 1
+                self.vid_prefix = self.vid_drn + '/' + str(self.vid_n) + '_'
+            else:
                 self.save_vid_btn = False
-        else:                   # Finish recording
-            time.sleep(0.5)     # Wait for img pipeline (unnecessary?)
-            if self.video_writer:
-                self.video_writer.release()
-            self.video_writer = None
-        flag.set()              # Continue capture
+        #     fn = FileDialog('Save video', '.avi', save=True)
+        #     if fn:                  # Start recording
+        #         self.vid_drn = get_dir_name(fn)
+        #         self.vid_frame = 1
+        #         # codec = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
+        #         # fps = 10
+        #         # shape = parent.image.shape[:2][::-1]
+        #         # self.video_writer = cv2.VideoWriter(fn, codec, fps, shape)
+        #     else:                   # Cancel recording
+        #         self.save_vid_btn = False
+        # else:                   # Finish recording
+        #     time.sleep(0.5)     # Wait for img pipeline (unnecessary?)
+        #     if self.vid_writer:
+        #         self.vid_writer.release()
+        #     self.vid_writer = None
+            flag.set()              # Continue capture
+        else:
+            self.save_vid_btn = False
 
 
 # Sensor templates
