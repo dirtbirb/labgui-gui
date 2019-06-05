@@ -9,6 +9,9 @@ import wx
 
 # Constants -------------------------------------------------------------------
 
+# Math
+PI2 = np.pi / 2
+
 # Colored pixels
 BLUE_PX = np.uint8((255, 0, 0))         # BGR format for OpenCV / NumPy
 GREEN_PX = np.uint8((0, 255, 0))
@@ -183,7 +186,7 @@ class TestSensor(GuiSensor):
         self.img_thread = None
         self.start()
 
-    def __img_loop(self):
+    def _img_loop(self):
         put_image = self.img_queue.put
         while self.running:
             try:
@@ -193,7 +196,7 @@ class TestSensor(GuiSensor):
 
     def start(self):
         self.running = True
-        self.img_thread = threading.Thread(target=self.__img_loop)
+        self.img_thread = threading.Thread(target=self._img_loop)
         self.img_thread.daemon = True
         self.img_thread.start()
         return self.running
@@ -203,6 +206,22 @@ class TestSensor(GuiSensor):
         if self.img_thread:
             self.img_thread.join()
             self.img_thread = None
+
+
+class TestImgSensor(TestSensor):
+    ''' Test sensor, fills img_queue with copies of a hard-coded image. '''
+
+    IMG_PATH = "test.png"
+
+    def _img_loop(self):
+        put_image = self.img_queue.put
+        while self.running:
+            try:
+                put_image(
+                    cv2.imread(self.IMG_PATH, cv2.IMREAD_ANYDEPTH),
+                    timeout=self.timeout)
+            except queue.Full:
+                pass
 
 
 # wx.Dialog -------------------------------------------------------------------
@@ -1214,8 +1233,8 @@ class FringePanel(GuiPanel):
             self, size=SZ1, length=4, style=wx.TE_PROCESS_ENTER)
         draw_btn = wx.ToggleButton(self, label='Draw', size=SZ1)
         fringe_btn = wx.ToggleButton(self, label='Analyze', size=SZ2)
-        fringe_n_lbl = wx.StaticText(self, label='Count')
-        fringe_n = wx.StaticText(self, label='-')
+        fringe_count_lbl = wx.StaticText(self, label='Count')
+        fringe_count = wx.StaticText(self, label='-')
         fringe_tilt_lbl = wx.StaticText(self, label='Tilt')
         fringe_tilt = wx.StaticText(self, label='-')
         fringe_contrast_lbl = wx.StaticText(self, label='Contrast')
@@ -1227,7 +1246,7 @@ class FringePanel(GuiPanel):
         self.draw_n = draw_n
         self.draw_btn = draw_btn
         self.fringe_btn = fringe_btn
-        self.fringe_n = fringe_n
+        self.fringe_count = fringe_count
         self.fringe_tilt = fringe_tilt
         self.fringe_contrast = fringe_contrast
         self.controls.extend([draw_n, draw_btn, fringe_btn])
@@ -1237,8 +1256,8 @@ class FringePanel(GuiPanel):
             GuiItem(draw_n, (1, 0)),
             GuiItem(draw_btn, (1, 1)),
             GuiItem(fringe_btn, (2, 0), SP2, flag=wx.EXPAND),
-            GuiItem(fringe_n_lbl, (3, 0), flag=wx.ALIGN_RIGHT),
-            GuiItem(fringe_n, (3, 1)),
+            GuiItem(fringe_count_lbl, (3, 0), flag=wx.ALIGN_RIGHT),
+            GuiItem(fringe_count, (3, 1)),
             GuiItem(fringe_tilt_lbl, (4, 0), flag=wx.ALIGN_RIGHT),
             GuiItem(fringe_tilt, (4, 1)),
             GuiItem(fringe_contrast_lbl, (5, 0), flag=wx.ALIGN_RIGHT),
@@ -1265,58 +1284,56 @@ class FringePanel(GuiPanel):
         def pretty(n):
             return str(n)[:6]
 
-        def update(n='-', contrast='-', tilt='-'):
-            self.fringe_n = pretty(n)
+        def update(count='-', contrast='-', tilt='-'):
+            self.fringe_count = pretty(count)
             self.fringe_tilt = pretty(tilt)
             self.fringe_contrast = pretty(contrast)
 
         wait = self.fringe_flag.wait
         while True:
-            n = contrast = tilt = 0
+            count = contrast = tilt = 0
             if not self.fringe_btn:
                 wx.CallAfter(update)
             wait()
             time.sleep(1.)
             for n, c, t in self.fringe_data:
-                n += c
+                count += n
                 contrast += c
                 tilt += t
-            if n:
+            if count:
                 c = len(self.fringe_data)
-                wx.CallAfter(update, n/c, contrast/c, tilt/c)
+                wx.CallAfter(update, count/c, contrast/c, tilt/c)
                 self.fringe_data = []
 
     def fringe_img(self, img):
         if self.fringe_btn:
-            # TODO: test color images
+            # TODO: color images
             if is_color(img):
                 self.fringe_btn = False
             else:
-                # Gaussian blur
+                # Smoothing
                 img2 = cv2.GaussianBlur(img, (0, 0), 3)
 
                 # Fringe contrast
-                img_h, img_w = img2.shape
-                r = int(img_w / 20)
-                x, y = int(img_h/2), int(img_w/2)
+                h, w = img2.shape
+                x, y, r = int(w/2), int(h/2), int(w/20)
                 chunk = img2[x-r:x+r, y-r:y+r]
-                mx, mn = chunk.max(), chunk.min()
-                contrast = (mx - mn)/255
+                contrast = (chunk.max() - chunk.min()) / 255
 
-                # Fringe count / angle
-                # Do DFT
+                # Fringe count / tilt
+                # DFT
                 fft = np.fft.fftshift(np.abs(np.fft.rfft2(img2)))
-                fft_h, fft_w = fft.shape
-                # Mask DC
-                x_c, y_c, dc = int(fft_w/2), int(fft_h/2), self.dc_mask
+                # DC mask
+                h, w = fft.shape
+                x_c, y_c, dc = int(w/2), int(h/2), self.dc_mask
                 fft[y_c-dc:y_c+dc, x_c-dc:x_c+dc] = 0
                 # Find peak
                 y_max, x_max = np.unravel_index(fft.argmax(), fft.shape)
                 x_dist, y_dist = x_max - x_c, y_max - y_c
-                # Convert to fringe count
+                # Count
                 n = np.sqrt(x_dist*x_dist + y_dist*y_dist)
-                # Calculate tilt
-                tilt = np.degrees(y_dist/x_dist if x_dist else np.pi/2)
+                # Tilt
+                tilt = np.degrees(y_dist/x_dist + np.pi) if x_dist else 90.0
 
                 # Save results
                 self.fringe_data.append((n, contrast, tilt))
@@ -1327,19 +1344,19 @@ class FringePanel(GuiPanel):
             n = self.draw_n
             if isinstance(n, float):
                 h, w = img.shape[:2]
-                col_end = int(w/2)
-                d = int(h / (n + 1))
-                row = d
+                col = int(w/2)
+                row = d = int(h/(n+1) + 0.5)
                 px = GREEN_PX if is_color(img) else 255
-                while row < h - 1:
-                    img[row, :col_end] = px
+                for i in range(int(n)):
+                    img[row, :col] = px
                     row += d
             else:
-                self.reset()
+                self.draw_btn = False
+                self.draw_n = ''
         return img
 
     def process_img(self, img):
-        for process in (self.fringe_img, self.draw_img):
+        for process in (self.draw_img, self.fringe_img):
             img = process(img)
         return img
 
