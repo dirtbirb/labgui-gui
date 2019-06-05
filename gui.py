@@ -483,8 +483,11 @@ class ViewPanel(GuiPanel):
         ''' Target process for FPS counter thread '''
         def update(f):
             self.fps = f
+
         wait = self.parent.img_show.wait
         while True:
+            if not self.play_btn:
+                wx.CallAfter(update, '-')
             wait()
             f0 = self.frames
             time.sleep(self.fps_time)
@@ -495,8 +498,8 @@ class ViewPanel(GuiPanel):
         source = wx.Choice(self, size=WD2)
         play_btn = wx.ToggleButton(self, label='Start', size=SZ1)
         full_btn = wx.ToggleButton(self, label='Full', size=SZ1)
-        save_img_btn = wx.Button(self, label='Save', size=SZ1)
-        save_vid_btn = wx.ToggleButton(self, label='Record', size=SZ1)
+        img_save_btn = wx.Button(self, label='Save', size=SZ1)
+        vid_save_btn = wx.ToggleButton(self, label='Record', size=SZ1)
         sum_img_btn = wx.ToggleButton(self, label='Add', size=SZ1)
         sum_n = TextCtrl(
             self, value='0', size=SZ1, style=wx.TE_PROCESS_ENTER, length=4)
@@ -507,16 +510,16 @@ class ViewPanel(GuiPanel):
         source.Bind(wx.EVT_CHOICE, self.select_source)
         play_btn.Bind(wx.EVT_TOGGLEBUTTON, self.play)
         full_btn.Bind(wx.EVT_TOGGLEBUTTON, self.fullscreen)
-        save_img_btn.Bind(wx.EVT_BUTTON, self.save_img)
-        save_vid_btn.Bind(wx.EVT_TOGGLEBUTTON, self.save_vid)
+        img_save_btn.Bind(wx.EVT_BUTTON, self.save_img)
+        vid_save_btn.Bind(wx.EVT_TOGGLEBUTTON, self.save_vid)
         sum_n.Bind(wx.EVT_TEXT_ENTER, self.sum_start)
 
         # Expose elements as attributes
         self.source = source
         self.play_btn = play_btn
         self.full_btn = full_btn
-        self.save_img_btn = save_img_btn
-        self.save_vid_btn = save_vid_btn
+        self.img_save_btn = img_save_btn
+        self.vid_save_btn = vid_save_btn
         self.sum_img_btn = sum_img_btn
         self.sum_n = sum_n
         self.fps = fps
@@ -527,8 +530,8 @@ class ViewPanel(GuiPanel):
             GuiItem(source, (1, 0), SP2, wx.EXPAND),
             GuiItem(play_btn, (2, 0)),
             GuiItem(full_btn, (2, 1)),
-            GuiItem(save_img_btn, (3, 0)),
-            GuiItem(save_vid_btn, (3, 1)),
+            GuiItem(img_save_btn, (3, 0)),
+            GuiItem(vid_save_btn, (3, 1)),
             GuiItem(sum_img_btn, (4, 0)),
             GuiItem(sum_n, (4, 1)),
             GuiItem(fps_lbl, (5, 0), flag=ALIGN_CENTER_RIGHT),
@@ -553,8 +556,8 @@ class ViewPanel(GuiPanel):
         if self.play_btn:
             self.play_btn = False
             self.play()
-        if self.save_vid_btn:
-            self.save_vid_btn = False
+        if self.vid_save_btn:
+            self.vid_save_btn = False
             self.save_vid()
         self.sum_img_btn = False
         self.sum_n = 0
@@ -703,8 +706,8 @@ class ViewPanel(GuiPanel):
                 wx.FD_SAVE)
             if dialog.ShowModal() == wx.ID_OK:
                 fn = dialog.GetPath()
-                if fn[-4:].lower() != '.png':
-                    fn += '.png'
+                if fn[-4:].lower() != ext:
+                    fn += ext
                 cv2.imwrite(fn, img, (cv2.IMWRITE_PNG_COMPRESSION, 0))
                 self.img_drn = get_dir_name(fn)
         else:
@@ -716,7 +719,7 @@ class ViewPanel(GuiPanel):
         #     if not is_color(img):
         #         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         #     self.video_writer.write(img)
-        if self.save_vid_btn and self.vid_drn:
+        if self.vid_save_btn and self.vid_drn:
             fn = self.vid_prefix + str(self.vid_frame) + '.png'
             cv2.imwrite(fn, img, (cv2.IMWRITE_PNG_COMPRESSION, 0))
             self.vid_frame += 1
@@ -725,7 +728,7 @@ class ViewPanel(GuiPanel):
     def save_vid(self, event=None):
         ''' Start/stop recording, with save dialog '''
         # HACK: save series of images instead of avi
-        if self.play_btn and self.save_vid_btn:
+        if self.play_btn and self.vid_save_btn:
             flag = self.parent.img_show
             flag.clear()            # Pause capture
             dialog = wx.DirDialog(self, 'Save frames', self.vid_drn or '')
@@ -735,7 +738,7 @@ class ViewPanel(GuiPanel):
                 self.vid_n += 1
                 self.vid_prefix = self.vid_drn + '/' + str(self.vid_n) + '_'
             else:
-                self.save_vid_btn = False
+                self.vid_save_btn = False
         #     fn = FileDialog('Save video', '.avi', save=True)
         #     if fn:                  # Start recording
         #         self.vid_drn = get_dir_name(fn)
@@ -745,7 +748,7 @@ class ViewPanel(GuiPanel):
         #         # shape = parent.image.shape[:2][::-1]
         #         # self.video_writer = cv2.VideoWriter(fn, codec, fps, shape)
         #     else:                   # Cancel recording
-        #         self.save_vid_btn = False
+        #         self.vid_save_btn = False
         # else:                   # Finish recording
         #     time.sleep(0.5)     # Wait for img pipeline (unnecessary?)
         #     if self.vid_writer:
@@ -753,7 +756,7 @@ class ViewPanel(GuiPanel):
         #     self.vid_writer = None
             flag.set()              # Continue capture
         else:
-            self.save_vid_btn = False
+            self.vid_save_btn = False
 
 
 # Sensor templates
@@ -1199,40 +1202,98 @@ class FringePanel(GuiPanel):
     def __init__(self, *args, name='Fringes', **kwargs):
         super().__init__(*args, name=name, **kwargs)
         self.GetParent().img_processes['resized'].append(self.process_img)
+        self.fringe_counts = []
+        self.fringe_flag = threading.Event()
+        self.dc_mask = 2    # pixels
+        fringe_thread = threading.Thread(target=self.__fringe_loop)
+        fringe_thread.daemon = True
+        fringe_thread.start()
 
     def MakeLayout(self):
-        count = TextCtrl(self, size=SZ1, length=4, style=wx.TE_PROCESS_ENTER)
-        apply = wx.ToggleButton(self, label='Apply', size=SZ1)
+        draw_n = TextCtrl(
+            self, size=SZ1, length=4, style=wx.TE_PROCESS_ENTER)
+        draw_btn = wx.ToggleButton(self, label='Draw', size=SZ1)
+        fringe_btn = wx.ToggleButton(self, label='Count', size=SZ1)
+        fringes = wx.StaticText(
+            self, size=SZ1, style=wx.ST_NO_AUTORESIZE | wx.ALIGN_RIGHT)
 
-        count.Bind(wx.EVT_TEXT_ENTER, self.start)
+        draw_n.Bind(wx.EVT_TEXT_ENTER, self.draw_start)
+        fringe_btn.Bind(wx.EVT_TOGGLEBUTTON, self.fringe_start)
 
-        self.count = count
-        self.apply = apply
-        self.controls.extend([count, apply])
+        self.draw_n = draw_n
+        self.draw_btn = draw_btn
+        self.fringe_btn = fringe_btn
+        self.fringes = fringes
+        self.controls.extend([draw_n, draw_btn, fringe_btn])
 
         layout = [
             GuiItem(self.MakeLabel(), (0, 0), SP2),
-            GuiItem(count, (1, 0)),
-            GuiItem(apply, (1, 1))]
+            GuiItem(draw_n, (1, 0)),
+            GuiItem(draw_btn, (1, 1)),
+            GuiItem(fringes, (2, 0), flag=wx.ALIGN_CENTER_VERTICAL),
+            GuiItem(fringe_btn, (2, 1))]
         return layout
 
-    def start(self, event=None):
-        self.apply = True
+    def draw_start(self, event=None):
+        self.draw_btn = True
+
+    def fringe_start(self, event=None):
+        if self.fringe_btn:
+            self.fringe_flag.set()
+        else:
+            self.fringe_flag.clear()
 
     def validate(self, event=None):
         ret = True
-        if not isinstance(self.count, float):
+        if not isinstance(self.draw_n, float):
             self.reset()
             ret = False
         return ret
 
+    def __fringe_loop(self):
+        def update(n):
+            self.fringes = n
+
+        wait = self.fringe_flag.wait
+        while True:
+            total = 0
+            if not self.fringe_btn:
+                wx.CallAfter(update, '-')
+            wait()
+            time.sleep(1.)
+            for count in self.fringe_counts:
+                total += count
+            if total:
+                wx.CallAfter(update, str(total / len(self.fringe_counts))[:6])
+                self.fringe_counts = []
+
+    def count_fringes_img(self, img):
+        if self.fringe_btn:
+            # TODO: test color images
+            if is_color(img):
+                self.fringe_btn = False
+            else:
+                # Do DFT
+                fft = np.fft.fftshift(np.abs(np.fft.rfft2(img)))
+                # Mask DC
+                fft_h, fft_w = fft.shape
+                x_c, y_c, dc = int(fft_w/2), int(fft_h/2), self.dc_mask
+                fft[y_c-dc:y_c+dc, x_c-dc:x_c+dc] = 0
+                # Find peaks
+                y_max, x_max = np.unravel_index(fft.argmax(), fft.shape)
+                # Convert to fringe count
+                x_dist, y_dist = x_max - x_c, y_max - y_c
+                self.fringe_counts.append(
+                    np.sqrt(x_dist*x_dist + y_dist*y_dist))
+        return img
+
     def lines_img(self, img):
-        if self.apply:
-            count = self.count
-            if isinstance(count, float):
+        if self.draw_btn:
+            n = self.draw_n
+            if isinstance(n, float):
                 h, w = img.shape[:2]
                 col_end = int(w/2)
-                d = int(h / (count + 1))
+                d = int(h / (n + 1))
                 row = d
                 px = GREEN_PX if is_color(img) else 255
                 while row < h - 1:
@@ -1243,7 +1304,9 @@ class FringePanel(GuiPanel):
         return img
 
     def process_img(self, img):
-        return self.lines_img(img)
+        for process in (self.count_fringes_img, self.lines_img):
+            img = process(img)
+        return img
 
 
 class TargetPanel(GuiPanel):
