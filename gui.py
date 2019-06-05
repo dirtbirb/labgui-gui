@@ -1316,7 +1316,7 @@ class FringePanel(GuiPanel):
 
                 # Fringe contrast
                 h, w = img2.shape
-                x, y, r = int(w/2), int(h/2), int(w/20)
+                x, y, r = int(w/2), int(h/2), int(w/5)
                 chunk = img2[x-r:x+r, y-r:y+r]
                 contrast = (chunk.max() - chunk.min()) / 255
 
