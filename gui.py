@@ -1202,9 +1202,10 @@ class FringePanel(GuiPanel):
     def __init__(self, *args, name='Fringes', **kwargs):
         super().__init__(*args, name=name, **kwargs)
         self.GetParent().img_processes['resized'].append(self.process_img)
-        self.fringe_counts = []
-        self.fringe_flag = threading.Event()
         self.dc_mask = 2    # pixels
+        self.fringe_counts = []
+        self.fringe_contrasts = []
+        self.fringe_flag = threading.Event()
         fringe_thread = threading.Thread(target=self.__fringe_loop)
         fringe_thread.daemon = True
         fringe_thread.start()
@@ -1213,9 +1214,11 @@ class FringePanel(GuiPanel):
         draw_n = TextCtrl(
             self, size=SZ1, length=4, style=wx.TE_PROCESS_ENTER)
         draw_btn = wx.ToggleButton(self, label='Draw', size=SZ1)
-        fringe_btn = wx.ToggleButton(self, label='Count', size=SZ1)
-        fringes = wx.StaticText(
-            self, size=SZ1, style=wx.ST_NO_AUTORESIZE | wx.ALIGN_RIGHT)
+        fringe_btn = wx.ToggleButton(self, label='Analyze', size=SZ2)
+        fringe_n_lbl = wx.StaticText(self, label='Count')
+        fringe_n = wx.StaticText(self, label='-')
+        fringe_contrast_lbl = wx.StaticText(self, label='Contrast')
+        fringe_contrast = wx.StaticText(self, label='-')
 
         draw_n.Bind(wx.EVT_TEXT_ENTER, self.draw_start)
         fringe_btn.Bind(wx.EVT_TOGGLEBUTTON, self.fringe_start)
@@ -1223,15 +1226,19 @@ class FringePanel(GuiPanel):
         self.draw_n = draw_n
         self.draw_btn = draw_btn
         self.fringe_btn = fringe_btn
-        self.fringes = fringes
+        self.fringe_n = fringe_n
+        self.fringe_contrast = fringe_contrast
         self.controls.extend([draw_n, draw_btn, fringe_btn])
 
         layout = [
             GuiItem(self.MakeLabel(), (0, 0), SP2),
             GuiItem(draw_n, (1, 0)),
             GuiItem(draw_btn, (1, 1)),
-            GuiItem(fringes, (2, 0), flag=wx.ALIGN_CENTER_VERTICAL),
-            GuiItem(fringe_btn, (2, 1))]
+            GuiItem(fringe_btn, (2, 0), SP2, flag=wx.EXPAND),
+            GuiItem(fringe_n_lbl, (3, 0), flag=wx.ALIGN_RIGHT),
+            GuiItem(fringe_n, (3, 1)),
+            GuiItem(fringe_contrast_lbl, (4, 0), flag=wx.ALIGN_RIGHT),
+            GuiItem(fringe_contrast, (4, 1))]
         return layout
 
     def draw_start(self, event=None):
@@ -1251,30 +1258,43 @@ class FringePanel(GuiPanel):
         return ret
 
     def __fringe_loop(self):
-        def update(n):
-            self.fringes = n
+        def update(n='-', contrast='-'):
+            self.fringe_n, self.fringe_contrast = n, contrast
 
         wait = self.fringe_flag.wait
         while True:
-            total = 0
+            n = contrast = 0
             if not self.fringe_btn:
-                wx.CallAfter(update, '-')
+                wx.CallAfter(update)
             wait()
             time.sleep(1.)
-            for count in self.fringe_counts:
-                total += count
-            if total:
-                wx.CallAfter(update, str(total / len(self.fringe_counts))[:6])
-                self.fringe_counts = []
+            for c in self.fringe_counts:
+                n += c
+            for c in self.fringe_contrasts:
+                contrast += c
+            if n:
+                c = len(self.fringe_counts)
+                wx.CallAfter(update, str(n / c)[:6], str(contrast / c)[:6])
+                self.fringe_counts, self.fringe_contrasts = [], []
 
-    def count_fringes_img(self, img):
+    def fringe_img(self, img):
         if self.fringe_btn:
             # TODO: test color images
             if is_color(img):
                 self.fringe_btn = False
             else:
+                # Gaussian blur
+                img2 = cv2.GaussianBlur(img, (0, 0), 3)
+                # Simple contrast
+                img_h, img_w = img2.shape
+                r = int(img_w / 10)
+                x, y = int(img_h/2), int(img_w/2)
+                chunk = img2[x-r:x+r, y-r:y+r]
+                mx, mn = chunk.max(), chunk.min()
+                self.fringe_contrasts.append((mx - mn)/255)
+
                 # Do DFT
-                fft = np.fft.fftshift(np.abs(np.fft.rfft2(img)))
+                fft = np.fft.fftshift(np.abs(np.fft.rfft2(img2)))
                 # Mask DC
                 fft_h, fft_w = fft.shape
                 x_c, y_c, dc = int(fft_w/2), int(fft_h/2), self.dc_mask
@@ -1287,7 +1307,7 @@ class FringePanel(GuiPanel):
                     np.sqrt(x_dist*x_dist + y_dist*y_dist))
         return img
 
-    def lines_img(self, img):
+    def draw_img(self, img):
         if self.draw_btn:
             n = self.draw_n
             if isinstance(n, float):
@@ -1304,7 +1324,7 @@ class FringePanel(GuiPanel):
         return img
 
     def process_img(self, img):
-        for process in (self.count_fringes_img, self.lines_img):
+        for process in (self.fringe_img, self.draw_img):
             img = process(img)
         return img
 
