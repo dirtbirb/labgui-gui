@@ -1203,8 +1203,7 @@ class FringePanel(GuiPanel):
         super().__init__(*args, name=name, **kwargs)
         self.GetParent().img_processes['resized'].append(self.process_img)
         self.dc_mask = 2    # pixels
-        self.fringe_counts = []
-        self.fringe_contrasts = []
+        self.fringe_data = []
         self.fringe_flag = threading.Event()
         fringe_thread = threading.Thread(target=self.__fringe_loop)
         fringe_thread.daemon = True
@@ -1217,6 +1216,8 @@ class FringePanel(GuiPanel):
         fringe_btn = wx.ToggleButton(self, label='Analyze', size=SZ2)
         fringe_n_lbl = wx.StaticText(self, label='Count')
         fringe_n = wx.StaticText(self, label='-')
+        fringe_tilt_lbl = wx.StaticText(self, label='Tilt')
+        fringe_tilt = wx.StaticText(self, label='-')
         fringe_contrast_lbl = wx.StaticText(self, label='Contrast')
         fringe_contrast = wx.StaticText(self, label='-')
 
@@ -1227,6 +1228,7 @@ class FringePanel(GuiPanel):
         self.draw_btn = draw_btn
         self.fringe_btn = fringe_btn
         self.fringe_n = fringe_n
+        self.fringe_tilt = fringe_tilt
         self.fringe_contrast = fringe_contrast
         self.controls.extend([draw_n, draw_btn, fringe_btn])
 
@@ -1237,8 +1239,10 @@ class FringePanel(GuiPanel):
             GuiItem(fringe_btn, (2, 0), SP2, flag=wx.EXPAND),
             GuiItem(fringe_n_lbl, (3, 0), flag=wx.ALIGN_RIGHT),
             GuiItem(fringe_n, (3, 1)),
-            GuiItem(fringe_contrast_lbl, (4, 0), flag=wx.ALIGN_RIGHT),
-            GuiItem(fringe_contrast, (4, 1))]
+            GuiItem(fringe_tilt_lbl, (4, 0), flag=wx.ALIGN_RIGHT),
+            GuiItem(fringe_tilt, (4, 1)),
+            GuiItem(fringe_contrast_lbl, (5, 0), flag=wx.ALIGN_RIGHT),
+            GuiItem(fringe_contrast, (5, 1))]
         return layout
 
     def draw_start(self, event=None):
@@ -1258,24 +1262,29 @@ class FringePanel(GuiPanel):
         return ret
 
     def __fringe_loop(self):
-        def update(n='-', contrast='-'):
-            self.fringe_n, self.fringe_contrast = n, contrast
+        def pretty(n):
+            return str(n)[:6]
+
+        def update(n='-', contrast='-', tilt='-'):
+            self.fringe_n = pretty(n)
+            self.fringe_tilt = pretty(tilt)
+            self.fringe_contrast = pretty(contrast)
 
         wait = self.fringe_flag.wait
         while True:
-            n = contrast = 0
+            n = contrast = tilt = 0
             if not self.fringe_btn:
                 wx.CallAfter(update)
             wait()
             time.sleep(1.)
-            for c in self.fringe_counts:
+            for n, c, t in self.fringe_data:
                 n += c
-            for c in self.fringe_contrasts:
                 contrast += c
+                tilt += t
             if n:
-                c = len(self.fringe_counts)
-                wx.CallAfter(update, str(n / c)[:6], str(contrast / c)[:6])
-                self.fringe_counts, self.fringe_contrasts = [], []
+                c = len(self.fringe_data)
+                wx.CallAfter(update, n/c, contrast/c, tilt/c)
+                self.fringe_data = []
 
     def fringe_img(self, img):
         if self.fringe_btn:
@@ -1285,26 +1294,32 @@ class FringePanel(GuiPanel):
             else:
                 # Gaussian blur
                 img2 = cv2.GaussianBlur(img, (0, 0), 3)
-                # Simple contrast
+
+                # Fringe contrast
                 img_h, img_w = img2.shape
-                r = int(img_w / 10)
+                r = int(img_w / 20)
                 x, y = int(img_h/2), int(img_w/2)
                 chunk = img2[x-r:x+r, y-r:y+r]
                 mx, mn = chunk.max(), chunk.min()
-                self.fringe_contrasts.append((mx - mn)/255)
+                contrast = (mx - mn)/255
 
+                # Fringe count / angle
                 # Do DFT
                 fft = np.fft.fftshift(np.abs(np.fft.rfft2(img2)))
-                # Mask DC
                 fft_h, fft_w = fft.shape
+                # Mask DC
                 x_c, y_c, dc = int(fft_w/2), int(fft_h/2), self.dc_mask
                 fft[y_c-dc:y_c+dc, x_c-dc:x_c+dc] = 0
-                # Find peaks
+                # Find peak
                 y_max, x_max = np.unravel_index(fft.argmax(), fft.shape)
-                # Convert to fringe count
                 x_dist, y_dist = x_max - x_c, y_max - y_c
-                self.fringe_counts.append(
-                    np.sqrt(x_dist*x_dist + y_dist*y_dist))
+                # Convert to fringe count
+                n = np.sqrt(x_dist*x_dist + y_dist*y_dist)
+                # Calculate tilt
+                tilt = np.degrees(y_dist/x_dist if x_dist else np.pi/2)
+
+                # Save results
+                self.fringe_data.append((n, contrast, tilt))
         return img
 
     def draw_img(self, img):
