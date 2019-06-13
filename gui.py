@@ -637,13 +637,17 @@ class ViewPanel(GuiPanel):
         while not img_queue.empty():        # Purge any queued frames
             img_queue.get(False)
         # Create new device
+        wx.BeginBusyCursor()
         new_device = self.GetObject('source').GetClientData(source_index)
         try:
             self.device = new_device(img_queue)
         except Exception as e:
             print("Error: couldn't create sensor object. Details:\n", e)
-            self.del_source(source_index)   # Remove device from list on fail
+            self.set_source(0 if source_index else 1)
+            # self.del_source(source_index)   # Remove device from list on fail
             return
+        finally:
+            wx.EndBusyCursor()
         # Add new panels
         self.device_panels = self.device.make_panels(parent)
         for i, new_panel in enumerate(self.device_panels):
