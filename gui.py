@@ -1,5 +1,7 @@
 import cv2
+import inspect
 import numpy as np
+import os
 import queue
 import subprocess
 import threading
@@ -16,6 +18,9 @@ PI2 = np.pi / 2
 BLUE_PX = np.uint8((255, 0, 0))         # BGR format for OpenCV / NumPy
 GREEN_PX = np.uint8((0, 255, 0))
 RED_PX = np.uint8((0, 0, 255))
+
+# Image directory
+IMG_DIR = os.path.dirname(inspect.getfile(inspect.currentframe())) + "/img/"
 
 # wx.Size
 PX_PAD = 25
@@ -519,7 +524,7 @@ class ViewPanel(GuiPanel):
         full_btn = wx.ToggleButton(self, label='Full', size=SZ1)
         img_save_btn = wx.Button(self, label='Save', size=SZ1)
         vid_save_btn = wx.ToggleButton(self, label='Record', size=SZ1)
-        sum_img_btn = wx.ToggleButton(self, label='Add', size=SZ1)
+        sum_btn = wx.ToggleButton(self, label='Add', size=SZ1)
         sum_n = TextCtrl(
             self, value='0', size=SZ1, style=wx.TE_PROCESS_ENTER, length=4)
         fps_lbl = wx.StaticText(self, label='FPS ')
@@ -539,7 +544,7 @@ class ViewPanel(GuiPanel):
         self.full_btn = full_btn
         self.img_save_btn = img_save_btn
         self.vid_save_btn = vid_save_btn
-        self.sum_img_btn = sum_img_btn
+        self.sum_btn = sum_btn
         self.sum_n = sum_n
         self.fps = fps
 
@@ -551,7 +556,7 @@ class ViewPanel(GuiPanel):
             GuiItem(full_btn, (2, 1)),
             GuiItem(img_save_btn, (3, 0)),
             GuiItem(vid_save_btn, (3, 1)),
-            GuiItem(sum_img_btn, (4, 0)),
+            GuiItem(sum_btn, (4, 0)),
             GuiItem(sum_n, (4, 1)),
             GuiItem(fps_lbl, (5, 0), flag=ALIGN_CENTER_RIGHT),
             GuiItem(fps, (5, 1))]
@@ -578,7 +583,7 @@ class ViewPanel(GuiPanel):
         if self.vid_save_btn:
             self.vid_save_btn = False
             self.save_vid()
-        self.sum_img_btn = False
+        self.sum_btn = False
         self.sum_n = 0
         for panel in self.device_panels:
             panel.reset()
@@ -662,30 +667,33 @@ class ViewPanel(GuiPanel):
 
     # Manage display -------------------------------
     def sum_start(self, event=None):
-        self.sum_img_button = self.validate()
+        self.sum_btn = self.validate()
 
     def sum_img(self, img):
         ''' Rolling sum over self.sum_n frames '''
-        if self.sum_img_btn:
-            # Caching, saves a few lookups (probably useless)
+        if self.sum_btn:
+            # Reset all if n is invalid
             sum_n = self.sum_n
-            sum_final = self.sum_final
-            sum_dtype = self.sum_dtype
-            sum_frames = self.sum_frames
-            # Reset self.sum_final if format has changed
-            if sum_final is None                \
-               or isinstance(sum_n, str)        \
-               or sum_n < 1                     \
-               or sum_final.shape != img.shape  \
-               or sum_dtype != img.dtype:
+            if isinstance(sum_n, str) or sum_n < 2:
+                self.sum_btn = False
+                self.sum_dtype = None
+                self.sum_final = None
+                self.sum_frames = []
+            # Init or reset saved info if format has changed
+            elif self.sum_final is None                     \
+                    or self.sum_final.shape != img.shape    \
+                    or self.sum_dtype != img.dtype:
                 self.sum_dtype = img.dtype
                 self.sum_final = img.astype(np.float64)
                 self.sum_frames = [img.copy()]
+            # Otherwise, do the thing
             else:
                 # Add new image to self.sum_final and self.sum_frames
+                sum_final = self.sum_final
+                sum_frames = self.sum_frames
                 sum_final += img.astype(np.float64)
                 sum_frames.append(img.copy())
-                # Subtract frames if too many
+                # Subtract frames if n has changed and we have too many
                 while len(sum_frames) > sum_n:
                     sum_final -= sum_frames.pop(0)
                 # Return as appropriate dtype
@@ -697,12 +705,12 @@ class ViewPanel(GuiPanel):
                 new_dtype = np.uint16
                 mx = sum_final.max()
                 if mx > 65535 or (img.dtype == np.uint8 and mx > 255):
-                    f = 65535 / mx
-                    img = sum_final * f
+                    img = sum_final * (65535 / mx)
                 elif img.dtype == np.uint8:
                     new_dtype = np.uint8
                 img = img.astype(new_dtype)
-        else:
+        elif self.sum_dtype:
+            # Clear saved frames if any remain when button isn't pressed
             self.sum_dtype = None
             self.sum_final = None
             self.sum_frames = []
@@ -1514,7 +1522,7 @@ class VideoWindow(ImageWindow):
     def OnPaint(self, event):
         ''' Get image from queue and draw '''
         try:
-            img = self.img_queue.get(timeout=0.1)
+            img = self.img_queue.get(timeout=0.5)
         except queue.Empty:
             return
         # Skip frame if not resized properly (window recently changed size)
@@ -1608,11 +1616,14 @@ class GuiFrame(wx.Frame):
                 sensor_img = (sensor_img >> 8).astype(np.uint8)
             # Get target window and resize
             window = full_window if view_panel.full_btn else img_window
-            display_img = cv2.resize(sensor_img, tuple(window.GetSize()))
+            display_img = cv2.resize(
+                sensor_img, tuple(window.GetSize()),
+                interpolation=cv2.INTER_AREA)
             # Process resized image
             for process in img_processes['resized']:
                 display_img = process(display_img)
             # Send to window as RGB
+            # NOTE: calls refresh *before* making image available
             window.Refresh()
             display_put(to_rgb(display_img))
             view_panel.frames += 1
