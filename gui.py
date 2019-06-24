@@ -152,7 +152,7 @@ class GuiDevice(object):
 
 
 class HybridDevice(GuiDevice):
-    ''' Container for multiple interacting GuiDevices. '''
+    ''' Container for multiple interacting GuiDevices '''
 
     def __init__(self, devices=[], panels={}):
         super().__init__(panels)
@@ -214,7 +214,7 @@ class TestSensor(GuiSensor):
 
 
 class TestImgSensor(TestSensor):
-    ''' Test sensor, fills img_queue with copies of a hard-coded image. '''
+    ''' Test sensor, fills img_queue with copies of a hard-coded image '''
 
     IMG_PATH = "test.png"
 
@@ -298,7 +298,7 @@ class GuiItem():
 
 
 class GuiSizer(wx.GridBagSizer):
-    ''' wx.GridBagSizer that accepts list of GuiItems to build itself. '''
+    ''' wx.GridBagSizer that accepts list of GuiItems to build itself '''
 
     def __init__(self, items=None, hpad=None, vpad=None):
         super().__init__(hpad or PX_PAD_INNER, vpad or PX_PAD_INNER)
@@ -313,7 +313,7 @@ class GuiSizer(wx.GridBagSizer):
 # wx.Panel --------------------------------------------------------------------
 
 class GuiPanel(wx.Panel):
-    ''' Panel containing GUI elements that can be read/set like attributes
+    ''' Panel containing GUI elements that can be read/set like attributes.
         Also can be passed a device object for GUI to interact with. '''
 
     def __init__(self, parent, device=None, **kwargs):
@@ -324,7 +324,7 @@ class GuiPanel(wx.Panel):
         self.validate()
 
     def __getattribute__(self, name):
-        ''' Retrieve value of GUI elements instead of elements themselves. '''
+        ''' Retrieve value of GUI elements instead of elements themselves '''
         # If attribute "name" is a wx object...
         elem = object.__getattribute__(self, name)
         if isinstance(elem, wx.Object):
@@ -343,7 +343,7 @@ class GuiPanel(wx.Panel):
         return elem
 
     def __setattr__(self, name, value):
-        ''' Set value of GUI elements instead of overwriting elements. '''
+        ''' Set value of GUI elements instead of overwriting elements '''
         # If attribute "name" already exists...
         if hasattr(self, name):
             # If attribute "name" is a wx object...
@@ -372,11 +372,11 @@ class GuiPanel(wx.Panel):
         object.__setattr__(self, name, value)
 
     def GetObject(self, name):
-        ''' Bypass custom __getattribute__ to return a wx object. '''
+        ''' Bypass custom __getattribute__ to return a wx object '''
         return object.__getattribute__(self, name)
 
     def MakeLabel(self):
-        ''' Build and return a wx.StaticText from the panel name. '''
+        ''' Build and return a wx.StaticText from the panel name '''
         return wx.StaticText(self, label=self.GetName())
 
     def MakeLayout(self):
@@ -385,7 +385,7 @@ class GuiPanel(wx.Panel):
         return []
 
     def MakeSizerAndFit(self, items):
-        ''' Similar to SetSizerAndFit, but creates a GuiSizer first. '''
+        ''' Similar to SetSizerAndFit, but creates a GuiSizer first '''
         self.SetSizerAndFit(GuiSizer(items))
 
     def reset(self, event=None):
@@ -399,7 +399,7 @@ class GuiPanel(wx.Panel):
             #     control.SetSelection(0)
 
     def update(self, event=None):
-        ''' Refresh GuiPanel elements by triggering their event handlers. '''
+        ''' Refresh GuiPanel elements by triggering their event handlers '''
         self.reset()
         for control in self.controls:
             if isinstance(control, wx.TextCtrl):
@@ -423,7 +423,7 @@ class GuiPanel(wx.Panel):
 
 
 class HybridPanel(GuiPanel):
-    ''' Container panel to combine multiple GuiPanels. '''
+    ''' Container panel to combine multiple GuiPanels '''
 
     def __init__(self, parent, device=None, panels={}, **kwargs):
         self.panels = panels
@@ -497,13 +497,13 @@ class ViewPanel(GuiPanel):
         # FPS (frames per second) counter
         self.fps_time = fps_time
         self.frames = 0
-        fps_thread = threading.Thread(target=self.__fps_loop)
+        fps_thread = threading.Thread(target=self._fps_loop)
         fps_thread.daemon = True
         fps_thread.start()
         # Add processes to parent
         parent.img_processes['full'].extend([self.sum_img, self.save_frame])
 
-    def __fps_loop(self):
+    def _fps_loop(self):
         ''' Target process for FPS counter thread '''
         def update(f):
             self.fps = f
@@ -835,14 +835,14 @@ class ViewPanel(GuiPanel):
 #                 self.display[name].SetValue(str(self.values[name]))
 #
 #     def start(self, update_flag):
-#         def __update_loop(self):
+#         def _update_loop(self):
 #             while True:
 #                 update_flag.wait()
 #                 self.update()
 #                 update_flag.clear()
 #
 #         self.updating = threading.Thread(
-#             target=self.__update_loop, args=(update_flag, ))
+#             target=self._update_loop, args=(update_flag, ))
 #         self.updating.daemon = True
 #         self.updating.start()
 #
@@ -938,7 +938,7 @@ class RoiPanel(GuiPanel):
 
 class TextCtrlPanel(GuiPanel):
     ''' Provides build_settings as a helper method to create control panels
-        from a list of settings. '''
+        from a list of settings '''
 
     def build_textctrls(self, textctrls, start=(0, 0), size=SZ1, length=5):
         ''' Build column of functional TextCtrls from a list of parameters.
@@ -1099,7 +1099,7 @@ class ColorPanel(GuiPanel):
             self.sat_val = v
 
     def is_sat(self):
-        ''' Check if saturated pixel highlighting is active and ready. '''
+        ''' Check if saturated pixel highlighting is active and ready '''
         return self.sat_btn and isinstance(self.sat_map, np.ndarray)
 
     def colormap_img(self, img):
@@ -1236,7 +1236,7 @@ class FringePanel(GuiPanel):
         self.dc_mask = 2    # pixels
         self.fringe_data = []
         self.fringe_flag = threading.Event()
-        fringe_thread = threading.Thread(target=self.__fringe_loop)
+        fringe_thread = threading.Thread(target=self._fringe_loop)
         fringe_thread.daemon = True
         fringe_thread.start()
 
@@ -1292,7 +1292,7 @@ class FringePanel(GuiPanel):
             ret = False
         return ret
 
-    def __fringe_loop(self):
+    def _fringe_loop(self):
         def pretty(n):
             return str(n)[:6]
 
@@ -1378,11 +1378,10 @@ class TargetPanel(GuiPanel):
 
     def __init__(self, *args, name='Target', **kwargs):
         super().__init__(*args, name=name, **kwargs)
-        self.img_size = SZ_IMAGE  # Updated in process_img / process_dc
-
-        # These can't be initialized at the class level...
-        self.target_pen = wx.Pen((0, 200, 0), 2)  # Lime green
-        self.target_brush = wx.Brush((0, 0, 0), wx.BRUSHSTYLE_TRANSPARENT)
+        self.img_size = SZ_IMAGE    # Updated in process_img / process_dc
+        self.center_px = 5          # Clear region at center of crosshairs
+        self.pen = wx.Pen((0, 200, 0), 2)   # Lime green
+        self.brush = wx.Brush((0, 0, 0), wx.BRUSHSTYLE_TRANSPARENT)
         self.reset()
         self.GetParent().img_processes['dc'].append(self.process_dc)
 
@@ -1452,15 +1451,15 @@ class TargetPanel(GuiPanel):
         self.img_size = dc.Size
         target = self.target
         if target:
-            # Set brushes
-            dc.SetPen(self.target_pen)
-            dc.SetBrush(self.target_brush)
             # Validate input
             try:
                 x, y = float(self.x), float(self.y)
             except ValueError:
                 self.reset()
                 return
+            # Set brushes
+            dc.SetPen(self.pen)
+            dc.SetBrush(self.brush)
             # Convert sizes to pixels appropriate to given DC
             # TODO: do this for raw pixel entries too
             x_c = self.img_size[0] * x if x < 1 else x
@@ -1468,14 +1467,15 @@ class TargetPanel(GuiPanel):
             r = self.size
             # Draw target
             if target == 1:
+                c = self.center_px
                 dc.DrawLineList((
-                    (x_c, y_c-r, x_c, y_c-5),
-                    (x_c, y_c+r, x_c, y_c+5),
-                    (x_c-r, y_c, x_c-5, y_c),
-                    (x_c+r, y_c, x_c+5, y_c)))
+                    (x_c, y_c-r, x_c, y_c-c),
+                    (x_c, y_c+r, x_c, y_c+c),
+                    (x_c-r, y_c, x_c-c, y_c),
+                    (x_c+r, y_c, x_c+c, y_c)))
             elif target == 2:
-                r2 = 2 * r
-                dc.DrawRectangle(x_c-r, y_c-r, r2, r2)
+                r += r  # r *= 2
+                dc.DrawRectangle(x_c-r, y_c-r, r, r)
             else:   # target == 3:
                 dc.DrawCircle(x_c, y_c, r)
 
@@ -1588,11 +1588,11 @@ class GuiFrame(wx.Frame):
             'right': [self.img_window],
             'bottom': [self.view_panel]}
         # Start display thread
-        self.img_thread = threading.Thread(target=self.__display_loop)
+        self.img_thread = threading.Thread(target=self._display_loop)
         self.img_thread.daemon = True
         self.img_thread.start()
 
-    def __display_loop(self):
+    def _display_loop(self):
         ''' Run method for image display thread '''
         # Caching (avoids extra lookups, probably useless)
         display_put = self.display_queue.put
@@ -1635,7 +1635,7 @@ class GuiFrame(wx.Frame):
             parent.Add(module)
             parent.AddSpacer(padding)
 
-        def construct_panel(orientation, modules, padding=PX_PAD):
+        def build_panel(orientation, modules, padding=PX_PAD):
             ''' Build sizer from modules with given orientation and padding '''
             sizer = wx.BoxSizer(orientation)
             if len(modules) > 0:
@@ -1649,10 +1649,10 @@ class GuiFrame(wx.Frame):
         # Assemble GUI elements
         layout = self.layout
         gui_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        left_szr = construct_panel(wx.VERTICAL, layout['left'])
-        bot_szr = construct_panel(wx.HORIZONTAL, layout['bottom'])
+        left_szr = build_panel(wx.VERTICAL, layout['left'])
+        bot_szr = build_panel(wx.HORIZONTAL, layout['bottom'])
         layout['right'].append(bot_szr)
-        right_szr = construct_panel(wx.VERTICAL, layout['right'], PX_PAD_OUTER)
+        right_szr = build_panel(wx.VERTICAL, layout['right'], PX_PAD_OUTER)
         layout['right'].pop()   # allow bot_szr to be deleted on Assemble()
         # Assemble GUI
         gui_sizer.AddSpacer(PX_PAD_OUTER)
